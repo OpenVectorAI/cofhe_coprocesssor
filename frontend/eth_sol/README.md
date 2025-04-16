@@ -1,13 +1,28 @@
-# Sample Hardhat Project
+# Eth-Sol-Frontend for OpenVector Coprocessor
 
-This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.
+This is the frontend for the ethereum compatible networks for the OpenVector Coprocessor. It provides a solidity library to interact with the OpenVector Coprocessor network and do confidential computing.
 
-Try running some of the following tasks:
+### Features
 
-```shell
-npx hardhat help
-npx hardhat test
-REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat ignition deploy ./ignition/modules/Lock.ts
+- Adds support for confidential computing to existing Ethereum compatible networks.
+- Provides a simple and easy to use API for developers to interact with the OpenVector Coprocessor network.
+
+### Installation
+
+This project uses `Hardhat` and `NPM` for development. To install the project, run the following command:
+
+```bash
+npm install
 ```
+
+### Usage
+
+To use the library, you need to import the library in your smart contract and then use the functions provided by the library. Remember to update the COFHEExecutorAddress to the required exectuor address.
+
+```solidity
+pragma solidity ^0.8.0;
+
+import "../lib.sol";
+```
+
+Refer to example contract `cov_token.sol` in `contracts/exampls` directory for more details on how to use the library. The example contract is a confidential/encrypted token contract that uses the OpenVector Coprocessor network to do confidential computing.

@@ -1,5 +1,6 @@
-dist
-server.pem
 storage
 storage.meta
+openvector_cofhe_coprocessor_backend.log.jsonl
+artifacts/example_config.base.json
 __pycache__
+src/test

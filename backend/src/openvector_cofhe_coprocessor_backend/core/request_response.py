@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from enum import Enum
 from dataclasses import dataclass
+from typing import Protocol
 
 
 class DataType(Enum):
-    BIT = "bit"
+    SINGLE = "single"
     UINT32 = "uint32"
+    REENCRYPTION_KEY = "reencryption_key"
 
 
 class OperandLocation(Enum):
@@ -29,8 +31,6 @@ class Operand:
     # for retrieve_reencrypt operation, this represents the final required scheme
     # for retrieve operation, this is ignored
     encryption_scheme: OperandEncryptionScheme
-    # for retrieve_reencrypt operation, this represents the storage key and other data such key for reencryption
-    # the first 128 bits represent the storage key and the rest represent the data
     data: bytes
 
 
@@ -50,7 +50,9 @@ class Operation(Enum):
 
 @dataclass(frozen=True, slots=True)
 class Request:
-    """For data retrieval and store request op2 wont be considered"""
+    """For data retrieval and store request op2 wont be considered
+    For retrieve_reencrypt request, op2 will be considered as the public key
+    """
 
     id: str
     operation: Operation
@@ -69,11 +71,38 @@ class ResponseStatus(Enum):
     INVALID_ENCRYPTION_SCHEME = "invalid_encryption_scheme"
 
 
+class ResponseType(Protocol):
+    request_id: str
+    status: ResponseStatus
+    correlation_response_id: str
+
+
 @dataclass(frozen=True, slots=True)
-class Response:
+class Response(ResponseType):
     id: str
     request_id: str
     status: ResponseStatus
     result: Operand | None
     # for now represents the response id of the acceptance response
+    correlation_response_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ConfidentialCoinRequest:
+    id: str
+    is_mint_request: bool
+    sender_balance_storage_key: bytes
+    receiver_balance_storage_key: bytes
+    amount: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ConfidentialCoinResponse(ResponseType):
+    id: str
+    request_id: str
+    status: ResponseStatus
+    success: bool
+    # sender balance is total_supply in case of mint request
+    sender_balance_storage_key: bytes
+    receiver_balance_storage_key: bytes
     correlation_response_id: str = ""

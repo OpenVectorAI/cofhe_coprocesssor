@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from openvector_cofhe_coprocessor_backend.core.request_response import Request, Response
+from openvector_cofhe_coprocessor_backend.core.request_response import Request, Response, ConfidentialCoinRequest, ConfidentialCoinResponse
 
 
 class IClientNetwork(ABC):
@@ -39,7 +39,7 @@ class IClientNetwork(ABC):
         pass
 
     @abstractmethod
-    def get_request(self) -> Request:
+    def get_request(self) -> Request|ConfidentialCoinRequest:
         """Called by the main loop to get the request from the client network such as ethereum to process
 
         Must only return the request that are valid and can be processed, the main processing service wont
@@ -48,7 +48,7 @@ class IClientNetwork(ABC):
         pass
 
     @abstractmethod
-    def put_response(self, response: Response) -> None:
+    def put_response(self, response: Response|ConfidentialCoinResponse) -> None:
         """Called by the main loop to put the response back to the client network such as ethereum
 
         Called for both acceptance and completion of the request

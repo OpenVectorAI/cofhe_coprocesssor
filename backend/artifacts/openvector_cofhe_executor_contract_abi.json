@@ -66,6 +66,19 @@
   },
   {
     "inputs": [],
+    "name": "confidential_coin_request_cost",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "data_store_cost",
     "outputs": [
       {
@@ -88,6 +101,206 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "is_mint_request",
+            "type": "bool"
+          },
+          {
+            "internalType": "CRTT.EUint32",
+            "name": "sender_balance",
+            "type": "uint128"
+          },
+          {
+            "internalType": "CRTT.EUint32",
+            "name": "receiver_balance",
+            "type": "uint128"
+          },
+          {
+            "internalType": "bytes",
+            "name": "transfer_amount",
+            "type": "bytes"
+          },
+          {
+            "internalType": "uint256",
+            "name": "callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "payment_callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "function (struct CRTT.ConfidentialCoinResponse) payable external",
+            "name": "callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
+            "type": "function"
+          }
+        ],
+        "internalType": "struct CRTT.ConfidentialCoinRequest",
+        "name": "request",
+        "type": "tuple"
+      }
+    ],
+    "name": "executeRequest",
+    "outputs": [
+      {
+        "internalType": "CRTT.RequestID",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "components": [
+              {
+                "internalType": "enum CRTT.DataType",
+                "name": "data_type",
+                "type": "uint8"
+              },
+              {
+                "internalType": "enum CRTT.OperandEncryptionScheme",
+                "name": "encryption_scheme",
+                "type": "uint8"
+              },
+              {
+                "internalType": "bytes",
+                "name": "data",
+                "type": "bytes"
+              }
+            ],
+            "internalType": "struct CRTT.ValueOperand",
+            "name": "operand",
+            "type": "tuple"
+          },
+          {
+            "internalType": "uint256",
+            "name": "payment",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "acceptance_callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "submission_callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "payment_callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "function (struct CRTT.DataStoreResponse) payable external",
+            "name": "acceptance_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (struct CRTT.DataStoreResponse) payable external",
+            "name": "submission_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
+            "type": "function"
+          }
+        ],
+        "internalType": "struct CRTT.DataStoreRequest",
+        "name": "request",
+        "type": "tuple"
+      }
+    ],
+    "name": "executeRequest",
+    "outputs": [
+      {
+        "internalType": "CRTT.RequestID",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "enum CRTT.DataRequestedType",
+            "name": "requested_type",
+            "type": "uint8"
+          },
+          {
+            "internalType": "CRTT.DataKey",
+            "name": "key",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint256",
+            "name": "payment",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "payment_callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "function (struct CRTT.DataRetrievalResponse) payable external",
+            "name": "callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "CRTT.DataKey",
+            "name": "reencryption_key",
+            "type": "uint128"
+          }
+        ],
+        "internalType": "struct CRTT.DataRetrievalRequest",
+        "name": "request",
+        "type": "tuple"
+      }
+    ],
+    "name": "executeRequest",
+    "outputs": [
+      {
+        "internalType": "CRTT.RequestID",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "payable",
     "type": "function"
   },
   {
@@ -165,17 +378,12 @@
           },
           {
             "internalType": "uint256",
-            "name": "acceptance_callback_payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
             "name": "submission_callback_gas",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "submission_callback_payment",
+            "name": "payment_callback_gas",
             "type": "uint256"
           },
           {
@@ -186,144 +394,15 @@
           {
             "internalType": "function (struct CRTT.Response) payable external",
             "name": "submission_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
             "type": "function"
           }
         ],
         "internalType": "struct CRTT.Request",
-        "name": "request",
-        "type": "tuple"
-      }
-    ],
-    "name": "executeRequest",
-    "outputs": [
-      {
-        "internalType": "CRTT.RequestID",
-        "name": "",
-        "type": "uint128"
-      }
-    ],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
-            "components": [
-              {
-                "internalType": "enum CRTT.DataType",
-                "name": "data_type",
-                "type": "uint8"
-              },
-              {
-                "internalType": "enum CRTT.OperandEncryptionScheme",
-                "name": "encryption_scheme",
-                "type": "uint8"
-              },
-              {
-                "internalType": "bytes",
-                "name": "data",
-                "type": "bytes"
-              }
-            ],
-            "internalType": "struct CRTT.ValueOperand",
-            "name": "operand",
-            "type": "tuple"
-          },
-          {
-            "internalType": "uint256",
-            "name": "payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "acceptance_callback_gas",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "acceptance_callback_payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "submission_callback_gas",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "submission_callback_payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "function (struct CRTT.DataStoreResponse) payable external",
-            "name": "acceptance_callback",
-            "type": "function"
-          },
-          {
-            "internalType": "function (struct CRTT.DataStoreResponse) payable external",
-            "name": "submission_callback",
-            "type": "function"
-          }
-        ],
-        "internalType": "struct CRTT.DataStoreRequest",
-        "name": "request",
-        "type": "tuple"
-      }
-    ],
-    "name": "executeRequest",
-    "outputs": [
-      {
-        "internalType": "CRTT.RequestID",
-        "name": "",
-        "type": "uint128"
-      }
-    ],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "components": [
-          {
-            "internalType": "enum CRTT.DataRequestedType",
-            "name": "requested_type",
-            "type": "uint8"
-          },
-          {
-            "internalType": "CRTT.DataKey",
-            "name": "key",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint256",
-            "name": "payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "callback_gas",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "callback_payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "function (struct CRTT.DataRetrievalResponse) payable external",
-            "name": "callback",
-            "type": "function"
-          },
-          {
-            "internalType": "bytes",
-            "name": "reencryption_key",
-            "type": "bytes"
-          }
-        ],
-        "internalType": "struct CRTT.DataRetrievalRequest",
         "name": "request",
         "type": "tuple"
       }
@@ -354,10 +433,23 @@
   },
   {
     "inputs": [],
+    "name": "last_confidential_coin_request_id",
+    "outputs": [
+      {
+        "internalType": "CRTT.RequestID",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "last_data_request_id",
     "outputs": [
       {
-        "internalType": "uint128",
+        "internalType": "CRTT.RequestID",
         "name": "",
         "type": "uint128"
       }
@@ -370,7 +462,7 @@
     "name": "last_data_store_request_id",
     "outputs": [
       {
-        "internalType": "uint128",
+        "internalType": "CRTT.RequestID",
         "name": "",
         "type": "uint128"
       }
@@ -383,7 +475,7 @@
     "name": "last_request_id",
     "outputs": [
       {
-        "internalType": "uint128",
+        "internalType": "CRTT.RequestID",
         "name": "",
         "type": "uint128"
       }
@@ -431,6 +523,77 @@
         "type": "uint128"
       }
     ],
+    "name": "pending_confidential_coin_requests",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "is_mint_request",
+            "type": "bool"
+          },
+          {
+            "internalType": "CRTT.EUint32",
+            "name": "sender_balance",
+            "type": "uint128"
+          },
+          {
+            "internalType": "CRTT.EUint32",
+            "name": "receiver_balance",
+            "type": "uint128"
+          },
+          {
+            "internalType": "bytes",
+            "name": "transfer_amount",
+            "type": "bytes"
+          },
+          {
+            "internalType": "uint256",
+            "name": "callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "payment_callback_gas",
+            "type": "uint256"
+          },
+          {
+            "internalType": "function (struct CRTT.ConfidentialCoinResponse) payable external",
+            "name": "callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
+            "type": "function"
+          }
+        ],
+        "internalType": "struct CRTT.ConfidentialCoinRequest",
+        "name": "request",
+        "type": "tuple"
+      },
+      {
+        "internalType": "uint256",
+        "name": "payment",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "op_cost",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "CRTT.RequestID",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
     "name": "pending_data_requests",
     "outputs": [
       {
@@ -457,7 +620,7 @@
           },
           {
             "internalType": "uint256",
-            "name": "callback_payment",
+            "name": "payment_callback_gas",
             "type": "uint256"
           },
           {
@@ -466,9 +629,14 @@
             "type": "function"
           },
           {
-            "internalType": "bytes",
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "CRTT.DataKey",
             "name": "reencryption_key",
-            "type": "bytes"
+            "type": "uint128"
           }
         ],
         "internalType": "struct CRTT.DataRetrievalRequest",
@@ -481,9 +649,9 @@
         "type": "uint256"
       },
       {
-        "internalType": "address payable",
-        "name": "requestee",
-        "type": "address"
+        "internalType": "uint256",
+        "name": "op_cost",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -535,17 +703,12 @@
           },
           {
             "internalType": "uint256",
-            "name": "acceptance_callback_payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
             "name": "submission_callback_gas",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "submission_callback_payment",
+            "name": "payment_callback_gas",
             "type": "uint256"
           },
           {
@@ -556,6 +719,11 @@
           {
             "internalType": "function (struct CRTT.DataStoreResponse) payable external",
             "name": "submission_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
             "type": "function"
           }
         ],
@@ -569,9 +737,9 @@
         "type": "uint256"
       },
       {
-        "internalType": "address payable",
-        "name": "requestee",
-        "type": "address"
+        "internalType": "uint256",
+        "name": "op_cost",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -660,17 +828,12 @@
           },
           {
             "internalType": "uint256",
-            "name": "acceptance_callback_payment",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
             "name": "submission_callback_gas",
             "type": "uint256"
           },
           {
             "internalType": "uint256",
-            "name": "submission_callback_payment",
+            "name": "payment_callback_gas",
             "type": "uint256"
           },
           {
@@ -681,6 +844,11 @@
           {
             "internalType": "function (struct CRTT.Response) payable external",
             "name": "submission_callback",
+            "type": "function"
+          },
+          {
+            "internalType": "function (CRTT.RequestID) payable external",
+            "name": "payment_callback",
             "type": "function"
           }
         ],
@@ -694,9 +862,9 @@
         "type": "uint256"
       },
       {
-        "internalType": "address payable",
-        "name": "requestee",
-        "type": "address"
+        "internalType": "uint256",
+        "name": "op_cost",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -705,6 +873,19 @@
   {
     "inputs": [],
     "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "price",
+        "type": "uint256"
+      }
+    ],
+    "name": "setConfidentialCoinRequestPrice",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -749,6 +930,46 @@
       }
     ],
     "name": "setPrice",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "components": [
+          {
+            "internalType": "enum CRTT.ResponseStatus",
+            "name": "status",
+            "type": "uint8"
+          },
+          {
+            "internalType": "CRTT.RequestID",
+            "name": "request_id",
+            "type": "uint128"
+          },
+          {
+            "internalType": "bool",
+            "name": "success",
+            "type": "bool"
+          },
+          {
+            "internalType": "CRTT.EUint32",
+            "name": "sender_balance",
+            "type": "uint128"
+          },
+          {
+            "internalType": "CRTT.EUint32",
+            "name": "receiver_balance",
+            "type": "uint128"
+          }
+        ],
+        "internalType": "struct CRTT.ConfidentialCoinResponse",
+        "name": "response",
+        "type": "tuple"
+      }
+    ],
+    "name": "submitConfidentialCoinResponse",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

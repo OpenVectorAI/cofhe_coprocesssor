@@ -1,4 +1,8 @@
 {
-    "add": {
-    }
+    "add": 5,
+    "sub": 5,
+    "mul": 5,
+    "conf_coin":5,
+    "store": 5,
+    "retrieve": 5
 }

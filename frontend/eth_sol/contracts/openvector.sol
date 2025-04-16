@@ -9,38 +9,48 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "hardhat/console.sol";
 
 contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
-    // 10000 for the base gas cost
-    // 10000 for misc gas cost
-    // 2*21000 for the gas cost of the transactions
-    uint128 constant BASE_GAS_COST = 10000 + 10000 + 2 * 21000; // 62000
+    // 25000 for misc gas cost
+    // 3*21000 for the gas cost of the transactions(1 acceptance, 1 submission and 1 payback)
+    uint256 constant BUFFER_GAS_COST_FOR_CALLBACKS = 25000; // 10k gwei
+    uint256 constant BASE_GAS_COST =
+        (BUFFER_GAS_COST_FOR_CALLBACKS * 3 + 25000 + 3 * 21000) * (1000000000); // 163000
 
     struct RequestWithPaymentInfo {
         CRTT.Request request;
         uint256 payment;
-        address payable requestee;
+        uint256 op_cost;
     }
 
     struct DataRetrievalRequestWithPaymentInfo {
         CRTT.DataRetrievalRequest request;
         uint256 payment;
-        address payable requestee;
+        uint256 op_cost;
     }
 
     struct DataStoreRequestWithPaymentInfo {
         CRTT.DataStoreRequest request;
         uint256 payment;
-        address payable requestee;
+        uint256 op_cost;
     }
 
-    uint128 public last_request_id;
-    uint128 public last_data_request_id;
-    uint128 public last_data_store_request_id;
+    struct ConfidentialCoinRequestWithPaymentInfo {
+        CRTT.ConfidentialCoinRequest request;
+        uint256 payment;
+        uint256 op_cost;
+    }
+
+    CRTT.RequestID public last_request_id;
+    CRTT.RequestID public last_data_request_id;
+    CRTT.RequestID public last_data_store_request_id;
+    CRTT.RequestID public last_confidential_coin_request_id;
 
     mapping(CRTT.RequestID => RequestWithPaymentInfo) public pending_requests;
     mapping(CRTT.RequestID => DataRetrievalRequestWithPaymentInfo)
         public pending_data_requests;
     mapping(CRTT.RequestID => DataStoreRequestWithPaymentInfo)
         public pending_data_store_requests;
+    mapping(CRTT.RequestID => ConfidentialCoinRequestWithPaymentInfo)
+        public pending_confidential_coin_requests;
 
     // Cost is in gwei
     // zero cost means the operation is not supported
@@ -48,11 +58,17 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
     // decryption and reencryption cost are the same
     uint256 public decryption_cost;
     uint256 public data_store_cost;
+    uint256 public confidential_coin_request_cost;
 
     constructor() Ownable(msg.sender) {
-        last_request_id = 0;
-        last_data_request_id = 0;
-        last_data_store_request_id = 0;
+        last_request_id = CRTT.getDefaultRequestID();
+        last_data_request_id = CRTT.getDefaultRequestID();
+        last_data_store_request_id = CRTT.getDefaultRequestID();
+        last_confidential_coin_request_id = CRTT.getDefaultRequestID();
+        decryption_cost = 0;
+        data_store_cost = 0;
+        confidential_coin_request_cost = 0;
+        // the mapping will default to 0
     }
 
     function setPrice(
@@ -70,6 +86,10 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
         data_store_cost = price;
     }
 
+    function setConfidentialCoinRequestPrice(uint256 price) public onlyOwner {
+        confidential_coin_request_cost = price;
+    }
+
     function executeRequest(
         CRTT.Request calldata request
     ) external payable returns (CRTT.RequestID) {
@@ -83,25 +103,26 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
                 (price +
                     BASE_GAS_COST +
                     request.acceptance_callback_gas +
-                    request.acceptance_callback_payment +
                     request.submission_callback_gas +
-                    request.submission_callback_payment),
+                    request.payment_callback_gas),
             "Insufficient funds to execute the request"
         );
         console.log("Request requirements met");
 
-        uint128 requestId = last_request_id++;
-        CRTT.RequestID requestIdWrapped = CRTT.RequestID.wrap(requestId);
+        last_request_id = CRTT.incrementRequestID(last_request_id);
 
-        pending_requests[requestIdWrapped] = RequestWithPaymentInfo({
+        pending_requests[last_request_id] = RequestWithPaymentInfo({
             request: request,
             payment: msg.value,
-            requestee: payable(msg.sender)
+            op_cost: (price + BASE_GAS_COST + request.payment_callback_gas)
         });
 
-        emit CRTT.NewRequest(requestIdWrapped, CRTT.RequestType.OPERATION);
-        console.log("Request emitted for request %d", requestId);
-        return requestIdWrapped;
+        emit CRTT.NewRequest(last_request_id, CRTT.RequestType.OPERATION);
+        console.log(
+            "Request emitted for request %d",
+            CRTT.requestIDToUint128(last_request_id)
+        );
+        return last_request_id;
     }
 
     function executeRequest(
@@ -111,7 +132,7 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
         require(msg.value == request.payment, "Fund mismatch with the request");
         uint256 required_payment = BASE_GAS_COST +
             request.callback_gas +
-            request.callback_payment;
+            request.payment_callback_gas;
         if (
             request.requested_type == CRTT.DataRequestedType.DECRYPTED ||
             request.requested_type == CRTT.DataRequestedType.REENCRYPTED
@@ -124,72 +145,119 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             "Insufficient funds to execute the request"
         );
         console.log("Data Retrieval Request requirements met");
-        uint128 requestId = last_data_request_id++;
-        CRTT.RequestID requestIdWrapped = CRTT.RequestID.wrap(requestId);
+        last_data_request_id = CRTT.incrementRequestID(last_data_request_id);
 
         pending_data_requests[
-            requestIdWrapped
+            last_data_request_id
         ] = DataRetrievalRequestWithPaymentInfo({
             request: request,
             payment: msg.value,
-            requestee: payable(msg.sender)
+            op_cost: (decryption_cost +
+                BASE_GAS_COST +
+                request.payment_callback_gas)
         });
 
-        emit CRTT.NewRequest(requestIdWrapped, CRTT.RequestType.DATA_RETRIEVAL);
+        emit CRTT.NewRequest(
+            last_data_request_id,
+            CRTT.RequestType.DATA_RETRIEVAL
+        );
         console.log(
             "Data Retrieval Request emitted, for request %d",
-            requestId
+            CRTT.requestIDToUint128(last_data_request_id)
         );
-        return requestIdWrapped;
+        return last_data_request_id;
     }
 
     function executeRequest(
         CRTT.DataStoreRequest calldata request
     ) external payable returns (CRTT.RequestID) {
         console.log("Executing Data Store Request");
+        require(data_store_cost > 0, "Data Store operation is not supported");
         require(msg.value == request.payment, "Fund mismatch with the request");
         require(
             msg.value >=
                 BASE_GAS_COST +
                     data_store_cost +
                     request.acceptance_callback_gas +
-                    request.acceptance_callback_payment +
                     request.submission_callback_gas +
-                    request.submission_callback_payment,
+                    request.payment_callback_gas,
             "Insufficient funds to execute the request"
         );
         console.log("Data Store Request requirements met");
-        uint128 requestId = last_data_store_request_id++;
-        CRTT.RequestID requestIdWrapped = CRTT.RequestID.wrap(requestId);
+        last_data_store_request_id = CRTT.incrementRequestID(
+            last_data_store_request_id
+        );
 
         pending_data_store_requests[
-            requestIdWrapped
+            last_data_store_request_id
         ] = DataStoreRequestWithPaymentInfo({
             request: request,
             payment: msg.value,
-            requestee: payable(msg.sender)
+            op_cost: (data_store_cost +
+                BASE_GAS_COST +
+                request.payment_callback_gas)
         });
 
-        emit CRTT.NewRequest(requestIdWrapped, CRTT.RequestType.DATA_STORE);
-        console.log("Data Store Request emitted for request %d", requestId);
-        return requestIdWrapped;
+        emit CRTT.NewRequest(
+            last_data_store_request_id,
+            CRTT.RequestType.DATA_STORE
+        );
+        console.log(
+            "Data Store Request emitted for request %d",
+            CRTT.requestIDToUint128(last_data_store_request_id)
+        );
+        return last_data_store_request_id;
+    }
+
+    function executeRequest(
+        CRTT.ConfidentialCoinRequest calldata request
+    ) external payable returns (CRTT.RequestID) {
+        console.log("Executing ConfidentialCoin Request");
+        require(
+            confidential_coin_request_cost > 0,
+            "ConfidentialCoin operation is not supported"
+        );
+        require(
+            msg.value >=
+                BASE_GAS_COST +
+                    confidential_coin_request_cost +
+                    request.callback_gas,
+            "Insufficient funds to execute the request"
+        );
+        console.log("ConfidentialCoin Request requirements met");
+        last_confidential_coin_request_id = CRTT.incrementRequestID(
+            last_confidential_coin_request_id
+        );
+
+        pending_confidential_coin_requests[
+            last_confidential_coin_request_id
+        ] = ConfidentialCoinRequestWithPaymentInfo({
+            request: request,
+            payment: msg.value,
+            op_cost: (confidential_coin_request_cost +
+                BASE_GAS_COST +
+                request.payment_callback_gas)
+        });
+
+        emit CRTT.NewRequest(
+            last_confidential_coin_request_id,
+            CRTT.RequestType.CONFIDENTIAL_COIN
+        );
+        console.log(
+            "ConfidentialCoin Request emitted for request %d",
+            CRTT.requestIDToUint128(last_confidential_coin_request_id)
+        );
+        return last_confidential_coin_request_id;
     }
 
     function submitResponse(
         CRTT.Response calldata response
     ) external onlyOwner {
         uint256 gas_available = gasleft();
-        uint256 payment_used = 0;
         if (response.status == CRTT.ResponseStatus.ACCEPTED) {
             console.log(
                 "Calling the acceptance callback for request %d",
-                CRTT.RequestID.unwrap(response.request_id)
-            );
-            console.log(
-                "acceptance_callback_payment: %d",
-                pending_requests[response.request_id]
-                    .request
-                    .acceptance_callback_payment
+                CRTT.requestIDToUint128(response.request_id)
             );
             console.log(
                 "acceptance_callback_gas: %d",
@@ -201,9 +269,6 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
                 pending_requests[response.request_id]
                     .request
                     .acceptance_callback{
-                    value: pending_requests[response.request_id]
-                        .request
-                        .acceptance_callback_payment,
                     gas: (
                         pending_requests[response.request_id]
                             .request
@@ -215,19 +280,10 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             } catch {
                 console.log("Error in Acceptance Callback");
             }
-            payment_used = pending_requests[response.request_id]
-                .request
-                .acceptance_callback_payment;
         } else {
             console.log(
                 "Calling the submission callback for request %d",
-                CRTT.RequestID.unwrap(response.request_id)
-            );
-            console.log(
-                "submission_callback_payment: %d",
-                pending_requests[response.request_id]
-                    .request
-                    .submission_callback_payment
+                CRTT.requestIDToUint128(response.request_id)
             );
             console.log(
                 "submission_callback_gas: %d",
@@ -239,9 +295,6 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
                 pending_requests[response.request_id]
                     .request
                     .submission_callback{
-                    value: pending_requests[response.request_id]
-                        .request
-                        .submission_callback_payment,
                     gas: (
                         pending_requests[response.request_id]
                             .request
@@ -253,20 +306,43 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             } catch {
                 console.log("Error in Submission Callback");
             }
-            payment_used = pending_requests[response.request_id]
-                .request
-                .submission_callback_payment;
         }
         uint256 gas_used = gas_available - gasleft();
-        uint256 wei_used = gas_used * tx.gasprice + payment_used;
+        if (gas_used < BUFFER_GAS_COST_FOR_CALLBACKS) {
+            gas_used = 0;
+        } else {
+            gas_used -= BUFFER_GAS_COST_FOR_CALLBACKS;
+        }
+        uint256 wei_used = gas_used * tx.gasprice;
 
-        pending_requests[response.request_id].payment -= wei_used;
+        pending_requests[response.request_id].op_cost += wei_used;
 
-        // transfer the remaining to the requestee
         if (response.status != CRTT.ResponseStatus.ACCEPTED) {
-            (bool success, ) = pending_requests[response.request_id]
-                .requestee
-                .call{value: pending_requests[response.request_id].payment}("");
+            uint256 amount_to_transfer = pending_requests[response.request_id]
+                .payment - pending_requests[response.request_id].op_cost;
+            if (amount_to_transfer > 0) {
+                console.log(
+                    "Transferring %d for request id %d",
+                    amount_to_transfer,
+                    CRTT.requestIDToUint128(response.request_id)
+                );
+                try
+                    pending_requests[response.request_id]
+                        .request
+                        .payment_callback{
+                        gas: (
+                            pending_requests[response.request_id]
+                                .request
+                                .payment_callback_gas
+                        ) / 1000000000,
+                        value: amount_to_transfer
+                    }(response.request_id)
+                {
+                    console.log("Payment Callback successful");
+                } catch {
+                    console.log("Error in Payment Callback");
+                }
+            }
             delete pending_requests[response.request_id];
         }
     }
@@ -277,11 +353,7 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
         uint256 gas_available = gasleft();
         console.log(
             "Calling the callback for data retrieval request %d",
-            CRTT.RequestID.unwrap(response.request_id)
-        );
-        console.log(
-            "callback_payment: %d",
-            pending_data_requests[response.request_id].request.callback_payment
+            CRTT.requestIDToUint128(response.request_id)
         );
         console.log(
             "callback_gas: %d",
@@ -290,9 +362,6 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
         );
         try
             pending_data_requests[response.request_id].request.callback{
-                value: pending_data_requests[response.request_id]
-                    .request
-                    .callback_payment,
                 gas: (
                     pending_data_requests[response.request_id]
                         .request
@@ -305,40 +374,52 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             console.log("Error in Data Retrieve Callback");
         }
         uint256 gas_used = gas_available - gasleft();
-        uint256 payment_used = pending_data_requests[response.request_id]
-            .request
-            .callback_payment;
-        uint256 wei_used = gas_used * tx.gasprice + payment_used;
-
-        pending_data_requests[response.request_id].payment -= wei_used;
-
-        // transfer the remaining to the requestee
-        if (response.status != CRTT.ResponseStatus.ACCEPTED) {
-            (bool success, ) = pending_data_requests[response.request_id]
-                .requestee
-                .call{
-                value: pending_data_requests[response.request_id].payment
-            }("");
-            delete pending_data_requests[response.request_id];
+        if (gas_used < BUFFER_GAS_COST_FOR_CALLBACKS) {
+            gas_used = 0;
+        } else {
+            gas_used -= BUFFER_GAS_COST_FOR_CALLBACKS;
         }
+        uint256 wei_used = gas_used * tx.gasprice;
+
+        uint256 amount_to_transfer = pending_data_requests[response.request_id]
+            .payment -
+            wei_used -
+            pending_data_requests[response.request_id].op_cost;
+        if (amount_to_transfer > 0) {
+            console.log(
+                "Transferring %d  for request id %d",
+                amount_to_transfer,
+                CRTT.requestIDToUint128(response.request_id)
+            );
+            try
+                pending_data_requests[response.request_id]
+                    .request
+                    .payment_callback{
+                    gas: (
+                        pending_data_requests[response.request_id]
+                            .request
+                            .payment_callback_gas
+                    ) / 1000000000,
+                    value: amount_to_transfer
+                }(response.request_id)
+            {
+                console.log("Payment Callback successful");
+            } catch {
+                console.log("Error in Payment Callback");
+            }
+        }
+        delete pending_data_requests[response.request_id];
     }
 
     function submitDataStoreResponse(
         CRTT.DataStoreResponse calldata response
     ) external onlyOwner {
         uint256 gas_available = gasleft();
-        uint256 payment_used = 0;
 
         if (response.status == CRTT.ResponseStatus.ACCEPTED) {
             console.log(
                 "Calling the acceptance callback for data store request %d",
-                CRTT.RequestID.unwrap(response.request_id)
-            );
-            console.log(
-                "acceptance_callback_payment: %d",
-                pending_data_store_requests[response.request_id]
-                    .request
-                    .acceptance_callback_payment
+                CRTT.requestIDToUint128(response.request_id)
             );
             console.log(
                 "acceptance_callback_gas: %d",
@@ -350,9 +431,6 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
                 pending_data_store_requests[response.request_id]
                     .request
                     .acceptance_callback{
-                    value: pending_data_store_requests[response.request_id]
-                        .request
-                        .acceptance_callback_payment,
                     gas: (
                         pending_data_store_requests[response.request_id]
                             .request
@@ -364,19 +442,10 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             } catch {
                 console.log("Error in Data Store Acceptance Callback");
             }
-            payment_used = pending_data_store_requests[response.request_id]
-                .request
-                .acceptance_callback_payment;
         } else {
             console.log(
                 "Calling the submission callback for data store request %d",
-                CRTT.RequestID.unwrap(response.request_id)
-            );
-            console.log(
-                "submission_callback_payment: %d",
-                pending_data_store_requests[response.request_id]
-                    .request
-                    .submission_callback_payment
+                CRTT.requestIDToUint128(response.request_id)
             );
             console.log(
                 "submission_callback_gas: %d",
@@ -388,9 +457,6 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
                 pending_data_store_requests[response.request_id]
                     .request
                     .submission_callback{
-                    value: pending_data_store_requests[response.request_id]
-                        .request
-                        .submission_callback_payment,
                     gas: (
                         pending_data_store_requests[response.request_id]
                             .request
@@ -402,24 +468,115 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             } catch {
                 console.log("Error in Data Store Submission Callback");
             }
-            payment_used = pending_data_store_requests[response.request_id]
-                .request
-                .submission_callback_payment;
         }
         uint256 gas_used = gas_available - gasleft();
-        uint256 wei_used = gas_used * tx.gasprice + payment_used;
+        if (gas_used < BUFFER_GAS_COST_FOR_CALLBACKS) {
+            gas_used = 0;
+        } else {
+            gas_used -= BUFFER_GAS_COST_FOR_CALLBACKS;
+        }
+        uint256 wei_used = gas_used * tx.gasprice;
 
-        pending_data_store_requests[response.request_id].payment -= wei_used;
+        pending_data_store_requests[response.request_id].op_cost += wei_used;
 
-        // transfer the remaining to the requestee
         if (response.status != CRTT.ResponseStatus.ACCEPTED) {
-            (bool success, ) = pending_data_store_requests[response.request_id]
-                .requestee
-                .call{
-                value: pending_data_store_requests[response.request_id].payment
-            }("");
+            uint256 amount_to_transfer = pending_data_store_requests[
+                response.request_id
+            ].payment -
+                pending_data_store_requests[response.request_id].op_cost;
+            if (amount_to_transfer > 0) {
+                console.log(
+                    "Transferring %d for request id %d",
+                    amount_to_transfer,
+                    CRTT.requestIDToUint128(response.request_id)
+                );
+                try
+                    pending_data_store_requests[response.request_id]
+                        .request
+                        .payment_callback{
+                        gas: (
+                            pending_data_store_requests[response.request_id]
+                                .request
+                                .payment_callback_gas
+                        ) / 1000000000,
+                        value: amount_to_transfer
+                    }(response.request_id)
+                {
+                    console.log("Payment Callback successful");
+                } catch {
+                    console.log("Error in Payment Callback");
+                }
+            }
             delete pending_data_store_requests[response.request_id];
         }
+    }
+
+    function submitConfidentialCoinResponse(
+        CRTT.ConfidentialCoinResponse calldata response
+    ) external onlyOwner {
+        uint256 gas_available = gasleft();
+        console.log(
+            "Calling the callback for confidential coin request %d",
+            CRTT.requestIDToUint128(response.request_id)
+        );
+        console.log(
+            "acceptance_callback_gas: %d",
+            pending_confidential_coin_requests[response.request_id]
+                .request
+                .callback_gas / 1000000000
+        );
+        try
+            pending_confidential_coin_requests[response.request_id]
+                .request
+                .callback{
+                gas: (
+                    pending_confidential_coin_requests[response.request_id]
+                        .request
+                        .callback_gas
+                ) / 1000000000
+            }(response)
+        {
+            console.log("ConfidentialCoin Callback successful");
+        } catch {
+            console.log("Error in ConfidentialCoin Callback");
+        }
+
+        uint256 gas_used = gas_available - gasleft();
+        if (gas_used < BUFFER_GAS_COST_FOR_CALLBACKS) {
+            gas_used = 0;
+        } else {
+            gas_used -= BUFFER_GAS_COST_FOR_CALLBACKS;
+        }
+        uint256 wei_used = gas_used * tx.gasprice;
+        uint256 amount_to_transfer = pending_confidential_coin_requests[
+            response.request_id
+        ].payment -
+            pending_confidential_coin_requests[response.request_id].op_cost -
+            wei_used;
+        if (amount_to_transfer > 0) {
+            console.log(
+                "Transferring %d  for request id %d",
+                amount_to_transfer,
+                CRTT.requestIDToUint128(response.request_id)
+            );
+            try
+                pending_confidential_coin_requests[response.request_id]
+                    .request
+                    .payment_callback{
+                    gas: (
+                        pending_confidential_coin_requests[response.request_id]
+                            .request
+                            .payment_callback_gas
+                    ) / 1000000000,
+                    value: amount_to_transfer
+                }(response.request_id)
+            {
+                console.log("Payment Callback successful");
+            } catch {
+                console.log("Error in Payment Callback");
+            }
+        }
+        delete pending_confidential_coin_requests[response.request_id];
     }
 
     function withdraw() external onlyOwner {
