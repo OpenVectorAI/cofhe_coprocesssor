@@ -4,32 +4,49 @@ pragma solidity ^0.8.0;
 
 import "../lib.sol";
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "hardhat/console.sol";
 
-contract OVToken is Ownable {
-    uint256 public totalSupply;
-    mapping(address => uint256) public balances;
+/**
+ * @title OVToken
+ * @dev A simple ERC20 token with a publicly callable mint function.
+ * WARNING: A public mint function is generally unsafe for tokens intended to have value.
+ * This is for demonstration purposes only. And is used in demonstration of
+ * COVToken contract.
+ */
+contract OVToken is ERC20 {
+    constructor() ERC20("OVToken", "OVT") {}
 
-    constructor(uint256 totalSupply_) Ownable(msg.sender) {
-        totalSupply = 0;
-        mint(msg.sender, totalSupply_);
-    }
-
-    function transfer(address to, uint256 value) external {
-        require(balances[msg.sender] >= value, "Insufficient balance");
-        balances[msg.sender] -= value;
-        balances[to] += value;
-    }
-
-    function mint(address to, uint256 value) public {
-        totalSupply += value;
-        balances[to] += value;
+    /**
+     * @notice Creates `amount` tokens and assigns them to `to`, increasing
+     * the total supply.
+     * @dev This function is PUBLICLY CALLABLE. Anyone can mint tokens.
+     * This is highly insecure for a token with real value.
+     * @param to The address that will receive the minted tokens.
+     * @param amount The amount of tokens to mint.
+     */
+    function mint(address to, uint256 amount) public {
+        _mint(to, amount);
     }
 }
 
+/**
+ * @title COVToken
+ * @dev A simple confidential token contract that uses the COFHE library for
+ * confidential operations. It allows users to mint, transfer, and query
+ * their balances in a confidential manner.
+ * WARNING: This contract is for demonstration purposes only and should not
+ * be used in production without proper security audits and testing.
+ */
+
 contract COVToken is Ownable {
+    address public constant TOKEN_CONTRACT =
+    0xAf91c2de752e73F5eEe7ebe597bAd326986D818b;
+        // 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512;
+
     uint256 constant N_BASE_PAYMENT = 163000 * 1000000000;
     uint256 constant O_BASE_PAYMENT = 1000;
     uint256 constant BASE_PAYMENT = N_BASE_PAYMENT + O_BASE_PAYMENT;
@@ -63,6 +80,17 @@ contract COVToken is Ownable {
             REGISTER_KEY_FUNC_ACCEPTANCE_CALLBACK_PAYMENT +
             REGISTER_KEY_FUNC_SUBMISSION_CALLBACK_PAYMENT +
             PAYMENT_CALLBACK_PAYMENT;
+    uint256 constant UNWRAP_TO_ETH_FUNC_CALLBACK_PAYMENT = 60000 * 1000000000;
+    uint256 constant UNWRAP_TO_ETH_FUNC_PAYMENT =
+        BASE_PAYMENT +
+            UNWRAP_TO_ETH_FUNC_CALLBACK_PAYMENT +
+            PAYMENT_CALLBACK_PAYMENT;
+
+    IERC20 public immutable ACCEPTED_TOKEN = IERC20(TOKEN_CONTRACT);
+    // 1 OVToken = 1 COVToken
+    uint256 public ov_token_to_cov_token_ratio = 1;
+    // 1000000gwei = 1 COVToken
+    uint256 public eth_to_cov_token_ratio = 1000_000_000_000_000;
 
     CRTT.EUint32 public totalSupply;
     mapping(address => CRTT.EUint32) public balances;
@@ -70,9 +98,13 @@ contract COVToken is Ownable {
         address to;
         address payable from;
     }
-    bool minting = false;
+    struct unwrap_to {
+        address payable to;
+        uint256 amount;
+    }
+    bool computing = false;
     mapping(CRTT.RequestID => address payable) public pending_mint_requests;
-    mapping(address => bool) transfer_in_progress;
+    mapping(CRTT.RequestID => unwrap_to) public pending_unwrap_to_eth_requests;
     mapping(CRTT.RequestID => to_from) public pending_transfer_requests;
     mapping(CRTT.RequestID => address payable) register_requests;
     mapping(address => CRTT.DataKey) public registered_keys;
@@ -88,10 +120,18 @@ contract COVToken is Ownable {
         totalSupply = CRTT.getUintializedEUint32();
     }
 
+    function lockContract() internal {
+        require(!computing, "Computing in progress");
+        computing = true;
+    }
+
+    function unlockContract() internal {
+        require(computing, "Contract is not locked");
+        computing = false;
+    }
+
     function transfer(address to, bytes calldata value) external payable {
-        require(!transfer_in_progress[msg.sender], "Transfer in progress");
-        transfer_in_progress[msg.sender] = true;
-        transfer_in_progress[to] = true;
+        lockContract();
         // this means that user have 0 balance
         require(
             CRTT.isEUint32Initialized(balances[msg.sender]),
@@ -109,7 +149,9 @@ contract COVToken is Ownable {
                 false,
                 balances[msg.sender],
                 balances[to],
+                0,
                 value,
+                false,
                 TRANSFER_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.transferCallback,
@@ -156,17 +198,84 @@ contract COVToken is Ownable {
         CRTT.RequestID request_id
     ) external payable {
         console.log("Transfer payment callback");
-        transfer_in_progress[
-            pending_transfer_requests[request_id].from
-        ] = false;
-        transfer_in_progress[pending_transfer_requests[request_id].to] = false;
+        unlockContract();
         pending_transfer_requests[request_id].from.transfer(msg.value);
         delete pending_transfer_requests[request_id];
     }
 
+    function mintFromOVToken(address to, uint256 amount) external payable {
+        lockContract();
+        console.log("Minting %d to %s", amount, to);
+        console.log(
+            "At the rate of %d OVToken to 1 COVToken",
+            ov_token_to_cov_token_ratio
+        );
+        require(
+            ACCEPTED_TOKEN.balanceOf(msg.sender) >=
+                amount * ov_token_to_cov_token_ratio,
+            "Insufficient balance"
+        );
+        require(
+            ACCEPTED_TOKEN.allowance(msg.sender, address(this)) >=
+                amount * ov_token_to_cov_token_ratio,
+            "Insufficient allowance"
+        );
+        require(
+            ACCEPTED_TOKEN.transferFrom(
+                msg.sender,
+                address(this),
+                amount * ov_token_to_cov_token_ratio
+            ),
+            "Transfer failed"
+        );
+        pending_mint_requests[
+            COFHE.doConfidentialCoinCalculation(
+                MINT_FUNC_PAYMENT,
+                true,
+                totalSupply,
+                balances[to],
+                amount,
+                bytes(""),
+                false,
+                MINT_FUNC_CALLBACK_PAYMENT,
+                PAYMENT_CALLBACK_PAYMENT,
+                this.mintCallback,
+                this.mintPaymentCallback
+            )
+        ] = payable(to);
+    }
+
+    function mintFromEth(address to, uint256 amount) external payable {
+        lockContract();
+        console.log("Minting %d to %s", amount, to);
+        console.log(
+            "At the rate of %d eth to 1 COVToken",
+            eth_to_cov_token_ratio
+        );
+        require(
+            msg.value >= amount * eth_to_cov_token_ratio + MINT_FUNC_PAYMENT,
+            "Insufficient balance"
+        );
+
+        pending_mint_requests[
+            COFHE.doConfidentialCoinCalculation(
+                MINT_FUNC_PAYMENT,
+                true,
+                totalSupply,
+                balances[to],
+                amount,
+                bytes(""),
+                false,
+                MINT_FUNC_CALLBACK_PAYMENT,
+                PAYMENT_CALLBACK_PAYMENT,
+                this.mintCallback,
+                this.mintPaymentCallback
+            )
+        ] = payable(to);
+    }
+
     function mint(address to, bytes memory value) public payable {
-        require(!minting, "Mint in progress");
-        minting = true;
+        lockContract();
         console.log("Minting confidential amount %s to %s", string(value), to);
         pending_mint_requests[
             COFHE.doConfidentialCoinCalculation(
@@ -174,7 +283,9 @@ contract COVToken is Ownable {
                 true,
                 totalSupply,
                 balances[to],
+                0,
                 value,
+                false,
                 MINT_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.mintCallback,
@@ -215,9 +326,98 @@ contract COVToken is Ownable {
 
     function mintPaymentCallback(CRTT.RequestID request_id) external payable {
         console.log("Mint payment callback");
-        minting = false;
+        unlockContract();
         pending_mint_requests[request_id].transfer(msg.value);
         delete pending_mint_requests[request_id];
+    }
+
+    function unwrapFromCOVTokenForEth(uint256 amount) external payable {
+        lockContract();
+        require(
+            msg.value >= MINT_FUNC_PAYMENT,
+            "Insufficient balance for payment"
+        );
+        require(
+            CRTT.isEUint32Initialized(balances[msg.sender]),
+            "Insufficient balance"
+        );
+        console.log(
+            "Unwrapping %d COVToken to ETH",
+            amount * eth_to_cov_token_ratio
+        );
+        require(
+            amount * eth_to_cov_token_ratio <= address(this).balance,
+            "COVToken balance is not enough"
+        );
+        console.log(
+            "Unwrapping %d COVToken to OVToken",
+            amount * ov_token_to_cov_token_ratio
+        );
+        pending_unwrap_to_eth_requests[
+            COFHE.doConfidentialCoinCalculation(
+                UNWRAP_TO_ETH_FUNC_PAYMENT,
+                true,
+                totalSupply,
+                balances[msg.sender],
+                amount,
+                bytes(""),
+                true,
+                UNWRAP_TO_ETH_FUNC_CALLBACK_PAYMENT,
+                PAYMENT_CALLBACK_PAYMENT,
+                this.unwrapToEthCallback,
+                this.unwrapToEthPaymentCallback
+            )
+        ] = unwrap_to({
+            to: payable(msg.sender),
+            amount: amount * eth_to_cov_token_ratio
+        });
+    }
+
+    function unwrapToEthCallback(
+        CRTT.ConfidentialCoinResponse calldata res
+    ) external payable {
+        console.log("Unwrap to ETH acceptance callback");
+        if (res.status != CRTT.ResponseStatus.SUCCESS) {
+            console.log("Unwrap failed due to an error");
+            return;
+        }
+        if (res.success) {
+            address payable to = pending_unwrap_to_eth_requests[res.request_id].to;
+            uint256 amount = pending_unwrap_to_eth_requests[res.request_id]
+                .amount;
+            require(
+                amount <= address(this).balance,
+                "COVToken balance is not enough"
+            );
+            balances[to] = res.receiver_balance;
+            totalSupply = res.sender_balance;
+            to.transfer(amount);
+            console.log(
+                "Successfully unwrapped the confidential amount to %s and sent %d ETH",
+                to,
+                amount
+            );
+            console.log(
+                "The new balance key for %s is %d",
+                to,
+                CRTT.eUint32ToUint128(res.receiver_balance)
+            );
+            console.log(
+                "The new total supply is %d",
+                CRTT.eUint32ToUint128(res.sender_balance)
+            );
+        } else {
+            console.log("Unwrap failed due to insufficient balance");
+        }
+    }
+
+    function unwrapToEthPaymentCallback(
+        CRTT.RequestID request_id
+    ) external payable {
+        console.log("Unwrap to ETH payment callback");
+        unlockContract();
+        pending_unwrap_to_eth_requests[request_id].to.transfer(msg.value);
+        delete pending_unwrap_to_eth_requests[request_id];
     }
 
     function updateReencryptedBalance() external payable {
@@ -225,7 +425,6 @@ contract COVToken is Ownable {
             CRTT.isDataKeyValid(registered_keys[msg.sender]),
             "User not registered"
         );
-        require(!transfer_in_progress[msg.sender], "Transfer in progress");
         require(
             CRTT.isEUint32Initialized(balances[msg.sender]),
             "Insufficient balance"
@@ -275,7 +474,6 @@ contract COVToken is Ownable {
             CRTT.isDataKeyValid(registered_keys[msg.sender]),
             "User not registered"
         );
-        require(!transfer_in_progress[msg.sender], "Transfer in progress");
         require(
             CRTT.isEUint32Initialized(balances[msg.sender]),
             "Insufficient balance"
@@ -427,30 +625,29 @@ contract COVToken is Ownable {
         return registered_keys[user];
     }
 
-    function getMintingInProgress() external view returns (bool) {
-        return minting;
+    function getComputing() external view returns (bool) {
+        return computing;
     }
 
-    function getTransferInProgress() external view returns (bool) {
-        return transfer_in_progress[msg.sender];
+    function setOVTokenToCOVTokenRatio(uint256 ratio) external onlyOwner {
+        ov_token_to_cov_token_ratio = ratio;
     }
 
-    function getTransferInProgressOf(
-        address user
-    ) external view returns (bool) {
-        return transfer_in_progress[user];
+    function setEthToCOVTokenRatio(uint256 ratio) external onlyOwner {
+        eth_to_cov_token_ratio = ratio;
+    }
+
+    function getOVTokenToCOVTokenRatio() external view returns (uint256) {
+        return ov_token_to_cov_token_ratio;
+    }
+
+    function getEthToCOVTokenRatio() external view returns (uint256) {
+        return eth_to_cov_token_ratio;
     }
 
     // debug funcs
-    function setMinting(bool minting_) external onlyOwner {
-        minting = minting_;
-    }
-
-    function setTransferInProgress(
-        address user,
-        bool transfer_in_progress_
-    ) external onlyOwner {
-        transfer_in_progress[user] = transfer_in_progress_;
+    function setComputing(bool _computing) external onlyOwner {
+        computing = _computing;
     }
 
     function setRegisteredKey(
@@ -483,10 +680,10 @@ contract COVToken is Ownable {
     }
 
     function reset_contract() external onlyOwner {
-        minting = false;
+        lockContract();
+        console.log("Resetting the contract");
         for (uint256 i = 0; i < total_registered_users; i++) {
             registered_keys[registered_users[i]] = CRTT.getInvalidDataKey();
-            delete transfer_in_progress[registered_users[i]];
             balances[registered_users[i]] = CRTT.getUintializedEUint32();
             delete encrypted_balances[registered_users[i]];
             delete reencrypted_balances[registered_users[i]];
@@ -496,6 +693,7 @@ contract COVToken is Ownable {
         }
         totalSupply = CRTT.getUintializedEUint32();
         total_registered_users = 0;
+        unlockContract();
     }
 
     receive() external payable {}

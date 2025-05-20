@@ -241,6 +241,15 @@ class CPUCryptoSystemClientNodeWrapper:
             return await self._process_mint_request(request, response_id)
         return await self._process_transfer_request(request, response_id)
 
+    def _encrypt_and_serialize(self, data: int) -> bytes:
+        return serialize_single(
+            self._client_node.cryptosystem,
+            self._client_node.cryptosystem.encrypt(
+                self._client_node.network_encryption_key,
+                self._client_node.cryptosystem.make_plaintext(float(data)),
+            ),
+        )
+
     async def _process_transfer_request(
         self, request: ConfidentialCoinRequest, response_id: str
     ) -> ConfidentialCoinResponse:
@@ -248,6 +257,38 @@ class CPUCryptoSystemClientNodeWrapper:
             raise ValueError("Should not be a mint request")
 
         self._logger.debug(f"Processing transfer request {request.id}")
+
+        if request.consider_amount_negative:
+            self._logger.error(
+                LogMessage(
+                    message="Invalid transfer request",
+                    structured_log_message_data={
+                        "request_id": request.id,
+                        "consider_amount_negative": str(
+                            request.consider_amount_negative
+                        ),
+                    },
+                )
+            )
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.INVALID_DATA_TYPE,
+                    success=False,
+                    sender_balance_storage_key=request.sender_balance_storage_key,
+                    receiver_balance_storage_key=request.receiver_balance_storage_key,
+                    correlation_response_id=response_id,
+                )
+            )
+            return ConfidentialCoinResponse(
+                id=response_id,
+                request_id=request.id,
+                status=ResponseStatus.ACCEPTED,
+                success=False,
+                sender_balance_storage_key=request.sender_balance_storage_key,
+                receiver_balance_storage_key=request.receiver_balance_storage_key,
+            )
 
         sender_balance = self._get_cofhe_operand(
             Operand(
@@ -280,7 +321,13 @@ class CPUCryptoSystemClientNodeWrapper:
                 data_type=DataType.SINGLE,
                 location=OperandLocation.VALUE,
                 encryption_scheme=OperandEncryptionScheme.CLHSM2k,
-                data=request.amount,
+                data=(
+                    request.amount
+                    if isinstance(request.amount, bytes)
+                    else self._encrypt_and_serialize(
+                        request.amount,
+                    )
+                ),
             )
         )
         if (
@@ -306,7 +353,25 @@ class CPUCryptoSystemClientNodeWrapper:
                     },
                 )
             )
-            raise ValueError("Invalid balance")
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.INVALID_DATA_TYPE,
+                    success=False,
+                    sender_balance_storage_key=request.sender_balance_storage_key,
+                    receiver_balance_storage_key=request.receiver_balance_storage_key,
+                    correlation_response_id=response_id,
+                )
+            )
+            return ConfidentialCoinResponse(
+                id=response_id,
+                request_id=request.id,
+                status=ResponseStatus.ACCEPTED,
+                success=False,
+                sender_balance_storage_key=request.sender_balance_storage_key,
+                receiver_balance_storage_key=request.receiver_balance_storage_key,
+            )
 
         start_time = datetime.now()
         sucess, new_balances = native_transfer_func(
@@ -395,7 +460,8 @@ class CPUCryptoSystemClientNodeWrapper:
             raise ValueError("Should be a mint request")
 
         self._logger.debug(f"Processing mint request {request.id}")
-
+        if request.consider_amount_negative:
+            return await self._handle_deduction_request(request, response_id)
         # if both sender and receiver balance storage keys are empty,
         # just store the new balance value in storage and return that as new
         # sender balance storage key and receiver balance storage key
@@ -431,7 +497,13 @@ class CPUCryptoSystemClientNodeWrapper:
                 data_type=DataType.SINGLE,
                 location=OperandLocation.VALUE,
                 encryption_scheme=OperandEncryptionScheme.CLHSM2k,
-                data=request.amount,
+                data=(
+                    request.amount
+                    if isinstance(request.amount, bytes)
+                    else self._encrypt_and_serialize(
+                        request.amount,
+                    )
+                ),
             )
             new_total_amount_storage_key = self._get_new_storage_key()
             self._save_operand(new_total_amount_storage_key, new_total_amount)
@@ -469,7 +541,13 @@ class CPUCryptoSystemClientNodeWrapper:
                     data_type=DataType.SINGLE,
                     location=OperandLocation.VALUE,
                     encryption_scheme=OperandEncryptionScheme.CLHSM2k,
-                    data=request.amount,
+                    data=(
+                        request.amount
+                        if isinstance(request.amount, bytes)
+                        else self._encrypt_and_serialize(
+                            request.amount,
+                        )
+                    ),
                 )
             )
             new_total_amount = self._make_operand(
@@ -530,7 +608,13 @@ class CPUCryptoSystemClientNodeWrapper:
                     data_type=DataType.SINGLE,
                     location=OperandLocation.VALUE,
                     encryption_scheme=OperandEncryptionScheme.CLHSM2k,
-                    data=request.amount,
+                    data=(
+                        request.amount
+                        if isinstance(request.amount, bytes)
+                        else self._encrypt_and_serialize(
+                            request.amount,
+                        )
+                    ),
                 )
             )
             new_total_amount = self._make_operand(
@@ -570,6 +654,211 @@ class CPUCryptoSystemClientNodeWrapper:
             )
 
         raise NotImplementedError("Should not reach here")
+
+    async def _handle_deduction_request(
+        self, request: ConfidentialCoinRequest, response_id: str
+    ) -> ConfidentialCoinResponse:
+        if not request.is_mint_request:
+            raise ValueError("Should be a mint request")
+        if not request.consider_amount_negative:
+            raise ValueError("Should be a deduction request")
+
+        self._logger.debug(f"Processing deduction request {request.id}")
+
+        correlation_response_id = response_id
+        is_total_amount_zero = not request.sender_balance_storage_key or all(
+            b == 0 for b in request.sender_balance_storage_key
+        )
+        is_minter_balance_zero = not request.receiver_balance_storage_key or all(
+            b == 0 for b in request.receiver_balance_storage_key
+        )
+        if is_total_amount_zero or is_minter_balance_zero:
+            self._logger.error(
+                LogMessage(
+                    message="Invalid deduction request",
+                    structured_log_message_data={
+                        "request_id": request.id,
+                        "is_total_amount_zero": str(is_total_amount_zero),
+                        "is_minter_balance_zero": str(is_minter_balance_zero),
+                    },
+                )
+            )
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.SUCCESS,
+                    success=False,
+                    sender_balance_storage_key=request.sender_balance_storage_key,
+                    receiver_balance_storage_key=request.receiver_balance_storage_key,
+                    correlation_response_id=correlation_response_id,
+                )
+            )
+            return ConfidentialCoinResponse(
+                id=correlation_response_id,
+                request_id=request.id,
+                status=ResponseStatus.ACCEPTED,
+                success=False,
+                sender_balance_storage_key=request.sender_balance_storage_key,
+                receiver_balance_storage_key=request.receiver_balance_storage_key,
+            )
+
+        current_total_amount = self._get_cofhe_operand(
+            Operand(
+                data_type=DataType.SINGLE,
+                location=OperandLocation.STORAGE_KEY,
+                encryption_scheme=OperandEncryptionScheme.CLHSM2k,
+                data=request.sender_balance_storage_key,
+            )
+        )
+        current_minter_amount = self._get_cofhe_operand(
+            Operand(
+                data_type=DataType.SINGLE,
+                location=OperandLocation.STORAGE_KEY,
+                encryption_scheme=OperandEncryptionScheme.CLHSM2k,
+                data=request.receiver_balance_storage_key,
+            )
+        )
+        deduction_amount = self._get_cofhe_operand(
+            Operand(
+                data_type=DataType.SINGLE,
+                location=OperandLocation.VALUE,
+                encryption_scheme=OperandEncryptionScheme.CLHSM2k,
+                data=(
+                    request.amount
+                    if isinstance(request.amount, bytes)
+                    else self._encrypt_and_serialize(
+                        request.amount,
+                    )
+                ),
+            )
+        )
+        if (
+            not isinstance(current_total_amount, CipherText)
+            or not isinstance(current_minter_amount, CipherText)
+            or not isinstance(deduction_amount, CipherText)
+        ):
+            self._logger.error(
+                LogMessage(
+                    message="Invalid operand types for deduction request",
+                    structured_log_message_data={
+                        "request_id": request.id,
+                        "is_current_total_amount_corrupted": str(
+                            not isinstance(current_total_amount, CipherText)
+                        ),
+                        "is_current_minter_amount_corrupted": str(
+                            not isinstance(current_minter_amount, CipherText)
+                        ),
+                        "is_deduction_amount_corrupted": str(
+                            not isinstance(deduction_amount, CipherText)
+                        ),
+                        "current_total_amount": str(current_total_amount),
+                        "current_minter_amount": str(current_minter_amount),
+                        "deduction_amount": str(deduction_amount),
+                    },
+                )
+            )
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.INVALID_DATA_TYPE,
+                    success=False,
+                    sender_balance_storage_key=request.sender_balance_storage_key,
+                    receiver_balance_storage_key=request.receiver_balance_storage_key,
+                    correlation_response_id=correlation_response_id,
+                )
+            )
+            return ConfidentialCoinResponse(
+                id=correlation_response_id,
+                request_id=request.id,
+                status=ResponseStatus.ACCEPTED,
+                success=False,
+                sender_balance_storage_key=request.sender_balance_storage_key,
+                receiver_balance_storage_key=request.receiver_balance_storage_key,
+            )
+
+        # Do a normal transfer with total amount as receiver and minter amount as sender
+        # if it passes subtract double the amount from the total amount
+        sucess, new_balances = native_transfer_func(
+            self._client_node,
+            current_minter_amount,
+            current_total_amount,
+            deduction_amount,
+        )
+
+        if not sucess:
+            self._logger.debug(
+                f"Deduction request failed {request.id} because of insufficient balance"
+            )
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.SUCCESS,
+                    success=False,
+                    sender_balance_storage_key=request.sender_balance_storage_key,
+                    receiver_balance_storage_key=request.receiver_balance_storage_key,
+                    correlation_response_id=correlation_response_id,
+                )
+            )
+            return ConfidentialCoinResponse(
+                id=correlation_response_id,
+                request_id=request.id,
+                status=ResponseStatus.ACCEPTED,
+                success=False,
+                sender_balance_storage_key=request.sender_balance_storage_key,
+                receiver_balance_storage_key=request.receiver_balance_storage_key,
+            )
+
+        new_minter_amount = self._make_operand(
+            DataType.SINGLE,
+            OperandLocation.VALUE,
+            OperandEncryptionScheme.CLHSM2k,
+            new_balances[0],
+        )
+        ekn = self._client_node.network_encryption_key
+        new_total_amount = self._make_operand(
+            DataType.SINGLE,
+            OperandLocation.VALUE,
+            OperandEncryptionScheme.CLHSM2k,
+            self._client_node.cryptosystem.add_ciphertexts(
+                ekn,
+                new_balances[1],
+                self._client_node.cryptosystem.negate_ciphertext(
+                    ekn,
+                    self._client_node.cryptosystem.scal_ciphertext(
+                        ekn,
+                        self._client_node.cryptosystem.make_plaintext(float(2)),
+                        current_total_amount,
+                    ),
+                ),
+            ),
+        )
+
+        new_total_amount_storage_key = self._get_new_storage_key()
+        new_minter_amount_storage_key = self._get_new_storage_key()
+        self._save_operand(new_total_amount_storage_key, new_total_amount)
+        self._save_operand(new_minter_amount_storage_key, new_minter_amount)
+        self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+            ConfidentialCoinResponse(
+                id=uuid.uuid4().hex,
+                request_id=request.id,
+                status=ResponseStatus.SUCCESS,
+                success=True,
+                sender_balance_storage_key=new_total_amount_storage_key,
+                receiver_balance_storage_key=new_minter_amount_storage_key,
+                correlation_response_id=correlation_response_id,
+            )
+        )
+        return ConfidentialCoinResponse(
+            id=correlation_response_id,
+            request_id=request.id,
+            status=ResponseStatus.ACCEPTED,
+            success=True,
+            sender_balance_storage_key=new_total_amount_storage_key,
+            receiver_balance_storage_key=new_minter_amount_storage_key,
+        )
 
     async def process_confidential_coin_request(
         self,
@@ -849,7 +1138,7 @@ class CPUCryptoSystemClientNodeWrapper:
         req = PyCOFHEComputeRequest(dop_instance)
         res = client_node.compute(req)
 
-        return res.data_bytes
+        return res.data
 
     def _get_cofhe_operand(self, operand: Operand) -> List[CipherText] | CipherText:
         data = operand.data

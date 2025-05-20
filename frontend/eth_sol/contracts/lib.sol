@@ -144,7 +144,14 @@ library CRTT {
         // sender balance is total_supply in case of mint request
         EUint32 sender_balance;
         EUint32 receiver_balance;
+        // if this is not zero, then the transfer_amount will be ignored
+        // the amount to be transferred in case of transfer request
+        // and the amount to be minted in case of mint request
+        uint256 plaintext_transfer_amount;
         bytes transfer_amount;
+        // this can be used to deduct the amount from the sender balance
+        // can be only be true for is_mint_request
+        bool consider_amount_negative;
         // in wei
         uint256 callback_gas;
         // The amount of wei not used in the callback won't be refunded
@@ -157,7 +164,8 @@ library CRTT {
     struct ConfidentialCoinResponse {
         ResponseStatus status;
         RequestID request_id;
-        // only applicable for transfer request, denotes the success of the transfer ie if sender has enough balance
+        // for transfer request, denotes the success of the transfer ie if sender has enough balance
+        // will always be true for normal mint_request and similiar to transfer request for deduction type
         bool success;
         EUint32 sender_balance;
         EUint32 receiver_balance;
@@ -173,7 +181,6 @@ library CRTT {
     event NewRequest(RequestID request_id, RequestType request_type);
     event RequestAccepted(RequestID request_id);
     event RequestProcessed(RequestID request_id, ResponseStatus status);
-
 
     function isDataKeyInitialized(DataKey key) internal pure returns (bool) {
         return DataKey.unwrap(key) != 0;
@@ -198,6 +205,7 @@ library CRTT {
     function isEUint32Initialized(EUint32 key) internal pure returns (bool) {
         return EUint32.unwrap(key) != 0;
     }
+
     function getUintializedEUint32() internal pure returns (EUint32) {
         return EUint32.wrap(0);
     }
@@ -230,7 +238,9 @@ library CRTT {
         return RequestID.wrap(0);
     }
 
-    function incrementRequestID(RequestID request_id) internal pure returns (RequestID) {
+    function incrementRequestID(
+        RequestID request_id
+    ) internal pure returns (RequestID) {
         require(
             RequestID.unwrap(request_id) < type(uint128).max,
             "Request ID overflow"
@@ -238,15 +248,16 @@ library CRTT {
         return RequestID.wrap(RequestID.unwrap(request_id) + 1);
     }
 
-    function decrementRequestID(RequestID request_id) internal pure returns (RequestID) {
-        require(
-            RequestID.unwrap(request_id) > 0,
-            "Request ID underflow"
-        );
+    function decrementRequestID(
+        RequestID request_id
+    ) internal pure returns (RequestID) {
+        require(RequestID.unwrap(request_id) > 0, "Request ID underflow");
         return RequestID.wrap(RequestID.unwrap(request_id) - 1);
     }
 
-    function requestIDToUint128(RequestID request_id) internal pure returns (uint128) {
+    function requestIDToUint128(
+        RequestID request_id
+    ) internal pure returns (uint128) {
         return RequestID.unwrap(request_id);
     }
 
@@ -254,7 +265,9 @@ library CRTT {
         return ResponseID.wrap(0);
     }
 
-    function responseIDToUint128(ResponseID response_id) internal pure returns (uint128) {
+    function responseIDToUint128(
+        ResponseID response_id
+    ) internal pure returns (uint128) {
         return ResponseID.unwrap(response_id);
     }
 }
@@ -303,8 +316,10 @@ interface COFHExecutor {
 // @notice This library is still under development and should not be used in production
 library COFHE {
     address constant COFHExecutorAddress =
-        // 0x5FbDB2315678afecb367f032d93F642f64180aa3;
-        0x56345C16CF4843838f19F2792B1a8bA16A7E743B;
+        0x8ed8818a47990EcE65dD83440522118B4958542b;
+
+    // 0x5FbDB2315678afecb367f032d93F642f64180aa3;
+    // 0x56345C16CF4843838f19F2792B1a8bA16A7E743B;
 
     // @dev Add two numbers
     // @param a First number
@@ -705,8 +720,13 @@ library COFHE {
     // and total supply in case of mint request
     // @param receiver_balance The balance of the receiver in case of transfer request
     // and balance of the minter in case of mint request
+    // @param plaintext_transfer_amount The amount to be transferred in case of transfer request
+    // and the amount to be minted in case of mint request. If this is not zero,
+    // then the transfer_amount will be ignored
     // @param transfer_amount The amount to be transferred in case of transfer request
     // and the amount to be minted in case of mint request
+    // @param consider_amount_negative True if the amount should be deducted from the sender balance
+    // in case of mint request otherwise false
     // @param callback_gas The amount of wei to be used for the callback
     // @param payment_callback_gas The amount of wei to be used for the payment callback
     // @param callback The callback function to be called after the request is processed
@@ -719,7 +739,9 @@ library COFHE {
         bool is_mint_request,
         CRTT.EUint32 sender_balance,
         CRTT.EUint32 receiver_balance,
+        uint256 plaintext_transfer_amount,
         bytes memory transfer_amount,
+        bool consider_amount_negative,
         uint256 callback_gas,
         uint256 payment_callback_gas,
         function(CRTT.ConfidentialCoinResponse memory)
@@ -732,7 +754,9 @@ library COFHE {
                 is_mint_request: is_mint_request,
                 sender_balance: sender_balance,
                 receiver_balance: receiver_balance,
+                plaintext_transfer_amount: plaintext_transfer_amount,
                 transfer_amount: transfer_amount,
+                consider_amount_negative: consider_amount_negative,
                 callback_gas: callback_gas,
                 payment_callback_gas: payment_callback_gas,
                 callback: callback,
@@ -743,7 +767,6 @@ library COFHE {
                 request
             );
     }
-
 
     function sendEUint32OperationRequest(
         CRTT.Operation operation,

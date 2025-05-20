@@ -8,7 +8,14 @@ See [Architecture Doc](docs/architecture.md) for more details on the architectur
 
 ## Usage
 
-Refer to the [README](backend/README.md) in the backend directory for more details on how to use the backend and the [README](frontend/eth_sol/README.md) in the frontend directory for more details on how to use the frontend.
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/openvectorai/openvector_coprocesssor.git
+   cd pycofhe
+   ```
+
+2. Refer to the [README](backend/README.md) in the backend directory for more details on how to use the backend and the [README](frontend/eth_sol/README.md) in the frontend directory for more details on how to use the frontend.
 
 ### Contributing
 
@@ -16,7 +23,7 @@ Contributions are welcome! Please follow these steps:
 
 1. **Fork the Repository**: Create a personal fork of the CoFHE repository on GitHub.
 
-2. **Create a Feature Branch**: 
+2. **Create a Feature Branch**:
 
    ```bash
    git checkout -b feature/your-feature-name

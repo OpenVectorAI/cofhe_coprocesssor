@@ -93,7 +93,8 @@ class ConfidentialCoinRequest:
     is_mint_request: bool
     sender_balance_storage_key: bytes
     receiver_balance_storage_key: bytes
-    amount: bytes
+    amount: bytes|int
+    consider_amount_negative: bool
 
 
 @dataclass(frozen=True, slots=True)

@@ -113,7 +113,11 @@ class EthereumTransactionSubmitter:
                 self._incr_nonce()
             except Web3RPCError as e:
                 # add more error handling
-                if e.rpc_response and e.rpc_response["error"]["code"]//1000 in [-32, -33] and "nonce too low" in e.message.lower():
+                if (
+                    e.rpc_response
+                    and e.rpc_response["error"]["code"] // 1000 in [-32, -33]
+                    and "nonce too low" in e.message.lower()
+                ):
                     # nonce is too low, we need to update it
                     self._logger.debug(
                         LogMessage(
@@ -1337,7 +1341,7 @@ def convert_from_native_data_store_response(
 
 
 SolidityConfidentialCoinRequest = Tuple[
-    bool, EthereumDataKey, EthereumDataKey, bytes, int, int, Any, Any
+    bool, EthereumDataKey, EthereumDataKey, int, bytes, bool, int, int, Any, Any
 ]
 
 
@@ -1346,7 +1350,9 @@ class EthereumConfidentialCoinRequest:
     is_mint_request: bool
     sender_balance_storage_key: EthereumDataKey
     receiver_balance_storage_key: EthereumDataKey
+    plaintext_amount: int
     amount: bytes
+    consider_amount_negative: bool
     callback_gas: Wei
     payment_callback_gas: Wei
     # callback funcs acceptance callback and submission callback are not required here
@@ -1361,11 +1367,13 @@ def encode_to_python_confidential_coin_request(
         is_mint_request=confidential_coin_request[0],
         sender_balance_storage_key=confidential_coin_request[1],
         receiver_balance_storage_key=confidential_coin_request[2],
-        amount=confidential_coin_request[3],
-        callback_gas=Wei(confidential_coin_request[4]),
-        payment_callback_gas=Wei(confidential_coin_request[5]),
-        callback=confidential_coin_request[6],
-        payment_callback=confidential_coin_request[7],
+        plaintext_amount=confidential_coin_request[3],
+        amount=confidential_coin_request[4],
+        consider_amount_negative=confidential_coin_request[5],
+        callback_gas=Wei(confidential_coin_request[6]),
+        payment_callback_gas=Wei(confidential_coin_request[7]),
+        callback=confidential_coin_request[8],
+        payment_callback=confidential_coin_request[9],
     )
 
 
@@ -1376,7 +1384,9 @@ def encode_to_solidity_confidential_coin_request(
         confidential_coin_request.is_mint_request,
         confidential_coin_request.sender_balance_storage_key,
         confidential_coin_request.receiver_balance_storage_key,
+        confidential_coin_request.plaintext_amount,
         confidential_coin_request.amount,
+        confidential_coin_request.consider_amount_negative,
         int(confidential_coin_request.callback_gas),
         int(confidential_coin_request.payment_callback_gas),
         confidential_coin_request.callback,
@@ -1396,7 +1406,12 @@ def convert_to_native_confidential_coin_request(
         receiver_balance_storage_key=confidential_coin_request.receiver_balance_storage_key.to_bytes(
             16, "big"
         ),
-        amount=confidential_coin_request.amount,
+        amount=(
+            confidential_coin_request.amount
+            if confidential_coin_request.plaintext_amount == 0
+            else confidential_coin_request.plaintext_amount
+        ),
+        consider_amount_negative=confidential_coin_request.consider_amount_negative,
     )
 
 
@@ -1411,7 +1426,9 @@ def convert_from_native_confidential_coin_request(
         receiver_balance_storage_key=int.from_bytes(
             request.receiver_balance_storage_key, "big"
         ),
-        amount=request.amount,
+        plaintext_amount=request.amount if isinstance(request.amount, int) else 0,
+        amount=request.amount if isinstance(request.amount, bytes) else b"",
+        consider_amount_negative=request.consider_amount_negative,
         callback_gas=Wei(0),
         payment_callback_gas=Wei(0),
         # this might cause an issue as these are callback functions and not none
@@ -2085,15 +2102,18 @@ class EthereumClientNetwork(IClientNetwork):
         logging.getLogger("web3.providers.WebSocketProvider").setLevel(logging.ERROR)
         logging.getLogger("requests").setLevel(logging.ERROR)
         logging.getLogger("urllib3").setLevel(logging.ERROR)
-        ssl_context = ssl.create_default_context()
+        websocket_kwargs = {
+            "ping_interval": 30,  # Send a ping every 30 seconds
+            "ping_timeout": 10,  # Wait 10 seconds for pong response
+        }
+        if self._config.provider.startswith("wss://"):
+            ssl_context = ssl.create_default_context()
+            websocket_kwargs["ssl"] = ssl_context
+
         web3 = AsyncWeb3(
             WebSocketProvider(
                 self._config.provider,
-                websocket_kwargs={
-                    "ssl": ssl_context,
-                    "ping_interval": 30,  # Send a ping every 30 seconds
-                    "ping_timeout": 10,  # Wait 10 seconds for pong response
-                },
+                websocket_kwargs=websocket_kwargs,
             )
         )
         try:
@@ -2238,38 +2258,48 @@ class EthereumClientNetwork(IClientNetwork):
                     raise ValueError("Invalid request type")
                 fetched_requests[native_req.id] = request
                 request_queue.put(native_req)
-
-        event_filter = await get_new_request_events_filter(contract)
-        continous_error_count = 0
-        while not self._exit_signal.is_set():
-            try:
-                await get_new_request_events(
-                    event_filter,
-                    self._logger,
-                    putter,
-                )
-                continous_error_count = 0
-            except Exception as e:
-                if not (await self._fetcher_web3.is_connected()):
-                    self._logger.error(
-                        "WebSocket connection lost. Waiting for reestablishment..."
+        
+        try:
+            event_filter = await get_new_request_events_filter(contract)
+            continous_error_count = 0
+            while not self._exit_signal.is_set():
+                try:
+                    await get_new_request_events(
+                        event_filter,
+                        self._logger,
+                        putter,
                     )
-                    return True
+                    continous_error_count = 0
+                except Exception as e:
+                    if not (await self._fetcher_web3.is_connected()):
+                        self._logger.error(
+                            "WebSocket connection lost. Waiting for reestablishment..."
+                        )
+                        return True
+                    self._logger.error(
+                        f"Error while fetching request: {e}. Retrying in 5 second"
+                    )
+                    continous_error_count += 1
+                    if continous_error_count > 5:
+                        self._logger.error(
+                            "Too many errors while fetching requests. Stopping request fetcher."
+                        )
+                        raise ValueError(
+                            "Too many errors while fetching requests. Stopping request fetcher."
+                        )
+                    await asyncio.sleep(4)
+                finally:
+                    await asyncio.sleep(1)
+            return False
+        except Exception as e:
+            self._logger.error(f"Error in request fetcher: {e}")
+            if not (await self._fetcher_web3.is_connected()):
                 self._logger.error(
-                    f"Error while fetching request: {e}. Retrying in 5 second"
+                    "WebSocket connection lost. Waiting for reestablishment..."
                 )
-                continous_error_count += 1
-                if continous_error_count > 5:
-                    self._logger.error(
-                        "Too many errors while fetching requests. Stopping request fetcher."
-                    )
-                    raise ValueError(
-                        "Too many errors while fetching requests. Stopping request fetcher."
-                    )
-                await asyncio.sleep(4)
-            finally:
-                await asyncio.sleep(1)
-        return False
+                return True
+            raise
+
 
     async def _response_sender_wrapper(
         self,
