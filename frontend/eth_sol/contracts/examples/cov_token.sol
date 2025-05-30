@@ -44,8 +44,8 @@ contract OVToken is ERC20 {
 
 contract COVToken is Ownable {
     address public constant TOKEN_CONTRACT =
-    0xAf91c2de752e73F5eEe7ebe597bAd326986D818b;
-        // 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512;
+        0x3CEa0f53909E8Ef1Dbd86E59D50aDe14A6819107;
+    // 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512;
 
     uint256 constant N_BASE_PAYMENT = 163000 * 1000000000;
     uint256 constant O_BASE_PAYMENT = 1000;
@@ -143,6 +143,13 @@ contract COVToken is Ownable {
             to,
             string(value)
         );
+        bytes[] memory empty_acl = new bytes[](0);
+        bytes[] memory receiver_acl = new bytes[](2);
+        if (CRTT.isEUint32Initialized(balances[to])==false){
+            console.log("Receiver %s is not registered", to);
+            receiver_acl[0] = abi.encodePacked(address(this));
+            receiver_acl[1] = abi.encodePacked(to);
+        }
         pending_transfer_requests[
             COFHE.doConfidentialCoinCalculation(
                 TRANSFER_FUNC_PAYMENT,
@@ -152,6 +159,8 @@ contract COVToken is Ownable {
                 0,
                 value,
                 false,
+                empty_acl,
+                receiver_acl,
                 TRANSFER_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.transferCallback,
@@ -228,6 +237,13 @@ contract COVToken is Ownable {
             ),
             "Transfer failed"
         );
+        bytes[] memory total_amount_acl = new bytes[](2);
+        bytes memory contract_address = abi.encodePacked(address(this));
+        total_amount_acl[0] = contract_address;
+        total_amount_acl[1] = bytes("");
+        bytes[] memory minter_acl = new bytes[](2);
+        minter_acl[0] = contract_address;
+        minter_acl[1] = abi.encodePacked(msg.sender);
         pending_mint_requests[
             COFHE.doConfidentialCoinCalculation(
                 MINT_FUNC_PAYMENT,
@@ -237,6 +253,8 @@ contract COVToken is Ownable {
                 amount,
                 bytes(""),
                 false,
+                total_amount_acl,
+                minter_acl,
                 MINT_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.mintCallback,
@@ -256,7 +274,13 @@ contract COVToken is Ownable {
             msg.value >= amount * eth_to_cov_token_ratio + MINT_FUNC_PAYMENT,
             "Insufficient balance"
         );
-
+        bytes[] memory total_amount_acl = new bytes[](2);
+        bytes memory contract_address = abi.encodePacked(address(this));
+        total_amount_acl[0] = contract_address;
+        total_amount_acl[1] = bytes("");
+        bytes[] memory minter_acl = new bytes[](2);
+        minter_acl[0] = contract_address;
+        minter_acl[1] = abi.encodePacked(msg.sender);
         pending_mint_requests[
             COFHE.doConfidentialCoinCalculation(
                 MINT_FUNC_PAYMENT,
@@ -266,6 +290,8 @@ contract COVToken is Ownable {
                 amount,
                 bytes(""),
                 false,
+                total_amount_acl,
+                minter_acl,
                 MINT_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.mintCallback,
@@ -277,6 +303,13 @@ contract COVToken is Ownable {
     function mint(address to, bytes memory value) public payable {
         lockContract();
         console.log("Minting confidential amount %s to %s", string(value), to);
+        bytes[] memory total_amount_acl = new bytes[](2);
+        bytes memory contract_address = abi.encodePacked(address(this));
+        total_amount_acl[0] = contract_address;
+        total_amount_acl[1] = bytes("");
+        bytes[] memory minter_acl = new bytes[](2);
+        minter_acl[0] = contract_address;
+        minter_acl[1] = abi.encodePacked(msg.sender);
         pending_mint_requests[
             COFHE.doConfidentialCoinCalculation(
                 MINT_FUNC_PAYMENT,
@@ -286,6 +319,8 @@ contract COVToken is Ownable {
                 0,
                 value,
                 false,
+                total_amount_acl,
+                minter_acl,
                 MINT_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.mintCallback,
@@ -353,6 +388,7 @@ contract COVToken is Ownable {
             "Unwrapping %d COVToken to OVToken",
             amount * ov_token_to_cov_token_ratio
         );
+        bytes[] memory empty_acl = new bytes[](0);
         pending_unwrap_to_eth_requests[
             COFHE.doConfidentialCoinCalculation(
                 UNWRAP_TO_ETH_FUNC_PAYMENT,
@@ -362,6 +398,8 @@ contract COVToken is Ownable {
                 amount,
                 bytes(""),
                 true,
+                empty_acl,
+                empty_acl,
                 UNWRAP_TO_ETH_FUNC_CALLBACK_PAYMENT,
                 PAYMENT_CALLBACK_PAYMENT,
                 this.unwrapToEthCallback,
@@ -382,7 +420,8 @@ contract COVToken is Ownable {
             return;
         }
         if (res.success) {
-            address payable to = pending_unwrap_to_eth_requests[res.request_id].to;
+            address payable to = pending_unwrap_to_eth_requests[res.request_id]
+                .to;
             uint256 amount = pending_unwrap_to_eth_requests[res.request_id]
                 .amount;
             require(

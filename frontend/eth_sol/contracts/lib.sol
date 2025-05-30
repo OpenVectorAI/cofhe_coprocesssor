@@ -152,6 +152,11 @@ library CRTT {
         // this can be used to deduct the amount from the sender balance
         // can be only be true for is_mint_request
         bool consider_amount_negative;
+        // the first is owner, others can reencrypt and decrypt the data
+        // it will only be considered for new data, already existing keys
+        // will get their acl from existing data
+        bytes[] sender_balance_storage_key_acl;
+        bytes[] receiver_balance_storage_key_acl;
         // in wei
         uint256 callback_gas;
         // The amount of wei not used in the callback won't be refunded
@@ -178,9 +183,17 @@ library CRTT {
         CONFIDENTIAL_COIN
     }
 
-    event NewRequest(RequestID request_id, RequestType request_type);
-    event RequestAccepted(RequestID request_id);
-    event RequestProcessed(RequestID request_id, ResponseStatus status);
+    event NewRequest(
+        RequestID request_id,
+        RequestType request_type,
+        address sender
+    );
+    event RequestAccepted(RequestID request_id, address accepted_by);
+    event RequestProcessed(
+        RequestID request_id,
+        ResponseStatus status,
+        address processed_by
+    );
 
     function isDataKeyInitialized(DataKey key) internal pure returns (bool) {
         return DataKey.unwrap(key) != 0;
@@ -316,10 +329,8 @@ interface COFHExecutor {
 // @notice This library is still under development and should not be used in production
 library COFHE {
     address constant COFHExecutorAddress =
-        0x8ed8818a47990EcE65dD83440522118B4958542b;
-
+        0x2099B2BC946adF9203FCc9FF7Bd8306843783f6b;
     // 0x5FbDB2315678afecb367f032d93F642f64180aa3;
-    // 0x56345C16CF4843838f19F2792B1a8bA16A7E743B;
 
     // @dev Add two numbers
     // @param a First number
@@ -727,11 +738,17 @@ library COFHE {
     // and the amount to be minted in case of mint request
     // @param consider_amount_negative True if the amount should be deducted from the sender balance
     // in case of mint request otherwise false
+    // @param sender_balance_storage_key_acl The ACL for the sender balance storage key
+    // @param receiver_balance_storage_key_acl The ACL for the receiver balance storage key
     // @param callback_gas The amount of wei to be used for the callback
     // @param payment_callback_gas The amount of wei to be used for the payment callback
     // @param callback The callback function to be called after the request is processed
     // @param payment_callback The callback function to be called after the payment is processed
     // @return Request ID of the confidential coin request
+    // @notice The first element of the acl list is the owner of the storage key
+    // the rest of the elements can reencrypt and decrypt the data
+    // @notice The sender_balance_storage_key_acl and receiver_balance_storage_key_acl
+    // are only considered for mint requests
     // @notice The payment callback function should be as efficient and deterministic as possible
     // as The amount of wei not used in the callback won't be refunded
     function doConfidentialCoinCalculation(
@@ -742,6 +759,8 @@ library COFHE {
         uint256 plaintext_transfer_amount,
         bytes memory transfer_amount,
         bool consider_amount_negative,
+        bytes[] memory sender_balance_storage_key_acl,
+        bytes[] memory receiver_balance_storage_key_acl,
         uint256 callback_gas,
         uint256 payment_callback_gas,
         function(CRTT.ConfidentialCoinResponse memory)
@@ -757,6 +776,8 @@ library COFHE {
                 plaintext_transfer_amount: plaintext_transfer_amount,
                 transfer_amount: transfer_amount,
                 consider_amount_negative: consider_amount_negative,
+                sender_balance_storage_key_acl: sender_balance_storage_key_acl,
+                receiver_balance_storage_key_acl: receiver_balance_storage_key_acl,
                 callback_gas: callback_gas,
                 payment_callback_gas: payment_callback_gas,
                 callback: callback,

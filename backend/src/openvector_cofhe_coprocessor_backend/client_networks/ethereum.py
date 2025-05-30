@@ -9,7 +9,7 @@ import uuid
 from openvector_cofhe_coprocessor_backend.common.logger import LogMessage, Logger
 from typing_extensions import override
 from dataclasses import dataclass
-from enum import Enum
+from enum import IntEnum
 from queue import Queue
 
 import asyncio
@@ -21,7 +21,7 @@ from web3.types import Wei, TxParams, Nonce, Gwei
 from web3.contract import AsyncContract
 from web3.exceptions import Web3RPCError
 
-from openvector_cofhe_coprocessor_backend.core.request_response import (
+from openvector_cofhe_coprocessor_backend.common.request_response import (
     Request,
     Operand,
     DataType,
@@ -33,7 +33,9 @@ from openvector_cofhe_coprocessor_backend.core.request_response import (
     ConfidentialCoinRequest,
     ConfidentialCoinResponse,
 )
-from openvector_cofhe_coprocessor_backend.core.client_network import IClientNetwork
+from openvector_cofhe_coprocessor_backend.client_networks.client_network_interface import (
+    IClientNetwork,
+)
 
 TIMEOUT = 10  # seconds
 
@@ -123,8 +125,8 @@ class EthereumTransactionSubmitter:
                         LogMessage(
                             message="Nonce is too low, updating nonce",
                             structured_log_message_data={
-                                "transaction_id": str(self._last_transaction_id + 1),
-                                "current_nonce": str(self._nonce),
+                                "transaction_id": self._last_transaction_id + 1,
+                                "current_nonce": self._nonce,
                             },
                         )
                     )
@@ -145,8 +147,8 @@ class EthereumTransactionSubmitter:
                     LogMessage(
                         message="Error submitting transaction",
                         structured_log_message_data={
-                            "transaction_id": str(self._last_transaction_id + 1),
-                            "error": str(e),
+                            "transaction_id": self._last_transaction_id + 1,
+                            "error": e,
                         },
                     )
                 )
@@ -156,8 +158,8 @@ class EthereumTransactionSubmitter:
                     LogMessage(
                         message="Error submitting transaction",
                         structured_log_message_data={
-                            "transaction_id": str(self._last_transaction_id + 1),
-                            "error": str(e),
+                            "transaction_id": self._last_transaction_id + 1,
+                            "error": e,
                         },
                     )
                 )
@@ -181,7 +183,7 @@ class EthereumTransactionSubmitter:
                 LogMessage(
                     message="Transaction timed out, retrying",
                     structured_log_message_data={
-                        "transaction_id": str(self._last_transaction_id + 1),
+                        "transaction_id": self._last_transaction_id + 1,
                         "function_name": function_name,
                         "args_": self._args_to_string(args),
                         "contract_address": self._contract.address,
@@ -213,10 +215,10 @@ class EthereumTransactionSubmitter:
             else f"Retrying transaction submission after doubling timeout"
         )
         structured_log_message_data = {
-            "transaction_id": str(self._last_transaction_id + 1),
+            "transaction_id": self._last_transaction_id + 1,
             "function_name": function_name,
             "args_": self._args_to_string(args),
-            "kwargs": json.dumps(kwargs),
+            "kwargs": kwargs,
             "contract_address": self._contract.address,
         }
         if retry:
@@ -248,9 +250,9 @@ class EthereumTransactionSubmitter:
             LogMessage(
                 message="Transaction submitted",
                 structured_log_message_data={
-                    "transaction_id": str(self._last_transaction_id + 1),
+                    "transaction_id": self._last_transaction_id + 1,
                     "tx_hash": tx_hash.hex(),
-                    "elapsed_time": str(end_time - start_time),
+                    "elapsed_time": end_time - start_time,
                 },
             )
         )
@@ -272,7 +274,7 @@ class EthereumTransactionSubmitter:
                 self._logger.error(
                     LogMessage(
                         message="Error getting nonce",
-                        structured_log_message_data={"error": str(e)},
+                        structured_log_message_data={"error": e},
                     )
                 )
                 raise
@@ -299,7 +301,7 @@ class EthereumTransactionSubmitter:
                 LogMessage(
                     message="Transaction failed, retrying",
                     structured_log_message_data={
-                        "transaction_id": str(transaction_id),
+                        "transaction_id": transaction_id,
                         "function_name": function_name,
                         "args_": self._args_to_string(args),
                         "contract_address": self._contract.address,
@@ -327,11 +329,11 @@ class EthereumTransactionSubmitter:
                 LogMessage(
                     message="Transaction timed out, retrying",
                     structured_log_message_data={
-                        "transaction_id": str(transaction_id),
+                        "transaction_id": transaction_id,
                         "tx_hash": tx_hash,
                         "retry_reason": "timeout",
-                        "new_timeout": str(3 * TIMEOUT),
-                        "old_timeout": str(TIMEOUT),
+                        "new_timeout": 3 * TIMEOUT,
+                        "old_timeout": TIMEOUT,
                     },
                 )
             )
@@ -353,9 +355,9 @@ class EthereumTransactionSubmitter:
                     LogMessage(
                         message="Transaction successful",
                         structured_log_message_data={
-                            "transaction_id": str(transaction_id),
+                            "transaction_id": transaction_id,
                             "tx_hash": tx_hash,
-                            "elapsed_time": str(end_time - start_time),
+                            "elapsed_time": end_time - start_time,
                         },
                     )
                 )
@@ -364,9 +366,9 @@ class EthereumTransactionSubmitter:
                     LogMessage(
                         message="Transaction failed",
                         structured_log_message_data={
-                            "transaction_id": str(transaction_id),
+                            "transaction_id": transaction_id,
                             "tx_hash": tx_hash,
-                            "elapsed_time": str(end_time - start_time),
+                            "elapsed_time": end_time - start_time,
                         },
                     )
                 )
@@ -376,9 +378,9 @@ class EthereumTransactionSubmitter:
                 LogMessage(
                     message="Error waiting for transaction",
                     structured_log_message_data={
-                        "transaction_id": str(transaction_id),
+                        "transaction_id": transaction_id,
                         "tx_hash": tx_hash,
-                        "error": str(e),
+                        "error": e,
                     },
                 )
             )
@@ -416,7 +418,7 @@ EthereumRequestID = int
 SolidityDataType = int
 
 
-class EthereumDataType(Enum):
+class EthereumDataType(IntEnum):
     SINGLE = 0
     UINT32 = 1
     RSA_PUBLIC_KEY = 2
@@ -469,7 +471,7 @@ def convert_from_native_data_type(data_type: DataType) -> EthereumDataType:
 SolidityOperation = int
 
 
-class EthereumOperation(Enum):
+class EthereumOperation(IntEnum):
     ADD = 0
     SUB = 1
     LT = 2
@@ -537,7 +539,7 @@ def convert_from_native_operation(operation_type: Operation) -> EthereumOperatio
 SolidityOperandLocation = int
 
 
-class EthereumOperandLocation(Enum):
+class EthereumOperandLocation(IntEnum):
     STORAGE_KEY = 0
     VALUE = 1
 
@@ -579,7 +581,7 @@ def convert_from_native_location(
 SolidityOperandEncryptionScheme = int
 
 
-class EthereumOperandEncryptionScheme(Enum):
+class EthereumOperandEncryptionScheme(IntEnum):
     NONE = 0
     CLHSM2k = 1
     RSA = 2
@@ -755,12 +757,15 @@ def encode_to_solidity_request(request: EthereumRequest) -> SolidityRequest:
     )
 
 
-def convert_to_native_request(request: EthereumRequest) -> Request:
+def convert_to_native_request(
+    request: EthereumRequest, verfied_origin: bytes
+) -> Request:
     return Request(
         id=uuid.uuid4().hex,
         operation=convert_to_native_operation(request.operation),
         op1=convert_to_native_operand(request.op1),
         op2=convert_to_native_operand(request.op2),
+        verified_origin=verfied_origin,
     )
 
 
@@ -786,7 +791,7 @@ def convert_from_native_request(request: Request) -> EthereumRequest:
 SolidityResponseStatus = int
 
 
-class EthereumResponseStatus(Enum):
+class EthereumResponseStatus(IntEnum):
     ACCEPTED = 0
     SUCCESS = 1
     FAILURE = 2
@@ -888,7 +893,7 @@ def convert_to_native_response(response: EthereumResponse) -> Response:
         id=uuid.uuid4().hex,
         # generally this request id represents native request id and not ethereum request id
         request_id=str(response.request_id),
-        status=ResponseStatus(response.status.value),
+        status=convert_to_native_response_status(response.status),
         result=convert_to_native_operand(response.result),
     )
 
@@ -906,7 +911,7 @@ def convert_from_native_response(
 SolidityDataRequestedType = int
 
 
-class EthereumDataRequestedType(Enum):
+class EthereumDataRequestedType(IntEnum):
     ENCRYPTED = 0
     REENCRYPTED = 1
     DECRYPTED = 2
@@ -1068,8 +1073,14 @@ def encode_to_solidity_data_retrieval_request(
 
 
 def convert_to_native_data_retrieval_request(
-    data_retrieval_request: EthereumDataRetrievalRequest,
+    data_retrieval_request: EthereumDataRetrievalRequest, verfied_origin: bytes
 ) -> Request:
+    if (
+        data_retrieval_request.requested_type != EthereumDataRequestedType.ENCRYPTED
+        and verfied_origin is None
+    ):
+        raise ValueError("Verified origin must be provided for non-encrypted requests")
+
     return Request(
         id=uuid.uuid4().hex,
         operation=(
@@ -1097,6 +1108,7 @@ def convert_to_native_data_retrieval_request(
                 else b""
             ),
         ),
+        verified_origin=verfied_origin,
     )
 
 
@@ -1167,7 +1179,7 @@ def convert_to_native_data_retrieval_response(
         id=uuid.uuid4().hex,
         # generally this request id represents native request id and not ethereum request id
         request_id=str(data_retrieval_response.request_id),
-        status=ResponseStatus(data_retrieval_response.status.value),
+        status=convert_to_native_response_status(data_retrieval_response.status),
         result=convert_to_native_value_operand(data_retrieval_response.result),
     )
 
@@ -1231,7 +1243,7 @@ def encode_to_solidity_data_store_request(
 
 
 def convert_to_native_data_store_request(
-    data_store_request: EthereumDataStoreRequest,
+    data_store_request: EthereumDataStoreRequest, verfied_origin: bytes
 ) -> Request:
     return Request(
         id=uuid.uuid4().hex,
@@ -1250,6 +1262,7 @@ def convert_to_native_data_store_request(
             encryption_scheme=OperandEncryptionScheme.NONE,
             data=b"",
         ),
+        verified_origin=verfied_origin,
     )
 
 
@@ -1318,7 +1331,7 @@ def convert_to_native_data_store_response(
         id=uuid.uuid4().hex,
         # generally this request id represents native request id and not ethereum request id
         request_id=str(data_store_response.request_id),
-        status=ResponseStatus(data_store_response.status.value),
+        status=convert_to_native_response_status(data_store_response.status),
         result=Operand(
             data_type=DataType.SINGLE,
             location=OperandLocation.VALUE,
@@ -1341,7 +1354,18 @@ def convert_from_native_data_store_response(
 
 
 SolidityConfidentialCoinRequest = Tuple[
-    bool, EthereumDataKey, EthereumDataKey, int, bytes, bool, int, int, Any, Any
+    bool,
+    EthereumDataKey,
+    EthereumDataKey,
+    int,
+    bytes,
+    bool,
+    List[bytes],
+    List[bytes],
+    int,
+    int,
+    Any,
+    Any,
 ]
 
 
@@ -1353,6 +1377,8 @@ class EthereumConfidentialCoinRequest:
     plaintext_amount: int
     amount: bytes
     consider_amount_negative: bool
+    sender_balance_storage_key_acl: List[bytes]
+    receiver_balance_storage_key_acl: List[bytes]
     callback_gas: Wei
     payment_callback_gas: Wei
     # callback funcs acceptance callback and submission callback are not required here
@@ -1370,10 +1396,12 @@ def encode_to_python_confidential_coin_request(
         plaintext_amount=confidential_coin_request[3],
         amount=confidential_coin_request[4],
         consider_amount_negative=confidential_coin_request[5],
-        callback_gas=Wei(confidential_coin_request[6]),
-        payment_callback_gas=Wei(confidential_coin_request[7]),
-        callback=confidential_coin_request[8],
-        payment_callback=confidential_coin_request[9],
+        sender_balance_storage_key_acl=confidential_coin_request[6],
+        receiver_balance_storage_key_acl=confidential_coin_request[7],
+        callback_gas=Wei(confidential_coin_request[8]),
+        payment_callback_gas=Wei(confidential_coin_request[9]),
+        callback=confidential_coin_request[10],
+        payment_callback=confidential_coin_request[11],
     )
 
 
@@ -1387,6 +1415,8 @@ def encode_to_solidity_confidential_coin_request(
         confidential_coin_request.plaintext_amount,
         confidential_coin_request.amount,
         confidential_coin_request.consider_amount_negative,
+        confidential_coin_request.sender_balance_storage_key_acl,
+        confidential_coin_request.receiver_balance_storage_key_acl,
         int(confidential_coin_request.callback_gas),
         int(confidential_coin_request.payment_callback_gas),
         confidential_coin_request.callback,
@@ -1412,6 +1442,8 @@ def convert_to_native_confidential_coin_request(
             else confidential_coin_request.plaintext_amount
         ),
         consider_amount_negative=confidential_coin_request.consider_amount_negative,
+        sender_balance_storage_key_acl=confidential_coin_request.sender_balance_storage_key_acl,
+        receiver_balance_storage_key_acl=confidential_coin_request.receiver_balance_storage_key_acl,
     )
 
 
@@ -1429,6 +1461,8 @@ def convert_from_native_confidential_coin_request(
         plaintext_amount=request.amount if isinstance(request.amount, int) else 0,
         amount=request.amount if isinstance(request.amount, bytes) else b"",
         consider_amount_negative=request.consider_amount_negative,
+        sender_balance_storage_key_acl=request.sender_balance_storage_key_acl,
+        receiver_balance_storage_key_acl=request.receiver_balance_storage_key_acl,
         callback_gas=Wei(0),
         payment_callback_gas=Wei(0),
         # this might cause an issue as these are callback functions and not none
@@ -1483,7 +1517,7 @@ def convert_to_native_confidential_coin_response(
         id=uuid.uuid4().hex,
         # generally this request id represents native request id and not ethereum request id
         request_id=str(confidential_coin_response.request_id),
-        status=ResponseStatus(confidential_coin_response.status.value),
+        status=convert_to_native_response_status(confidential_coin_response.status),
         success=confidential_coin_response.success,
         sender_balance_storage_key=confidential_coin_response.sender_balance_storage_key.to_bytes(
             16, "big"
@@ -1513,7 +1547,7 @@ def convert_from_native_confidential_coin_response(
 SolidityRequestType = int
 
 
-class EthereumRequestType(Enum):
+class EthereumRequestType(IntEnum):
     OPERATION = 0
     DATA_RETRIEVAL = 1
     DATA_STORE = 2
@@ -1532,13 +1566,14 @@ def encode_to_solidity_request_type(
     return request_type.value
 
 
-SolidityNewRequestEvent = Tuple[EthereumRequestID, SolidityRequestType]
+SolidityNewRequestEvent = Tuple[EthereumRequestID, SolidityRequestType, str]
 
 
 @dataclass(frozen=True, slots=True)
 class EthereumNewRequestEvent:
     request_id: EthereumRequestID
     request_type: EthereumRequestType
+    verified_origin: str
 
 
 def encode_to_python_new_request_event(
@@ -1547,6 +1582,7 @@ def encode_to_python_new_request_event(
     return EthereumNewRequestEvent(
         request_id=new_request_event[0],
         request_type=encode_to_python_request_type(new_request_event[1]),
+        verified_origin=new_request_event[2],
     )
 
 
@@ -1556,6 +1592,7 @@ def encode_to_solidity_new_request_event(
     return (
         new_request_event.request_id,
         encode_to_solidity_request_type(new_request_event.request_type),
+        new_request_event.verified_origin,
     )
 
 
@@ -1609,6 +1646,7 @@ class EthereumRequestWithPaymentInfoAndEthrereumRequestID:
     payment: Wei
     op_cost: Wei
     ethereum_request_id: EthereumRequestID
+    verified_origin: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -1617,6 +1655,7 @@ class EthereumDataRetrievalRequestWithPaymentInfoAndEthrereumRequestID:
     payment: Wei
     op_cost: Wei
     ethereum_request_id: EthereumRequestID
+    verified_origin: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -1625,6 +1664,7 @@ class EthereumDataStoreRequestWithPaymentInfoAndEthrereumRequestID:
     payment: Wei
     op_cost: Wei
     ethereum_request_id: EthereumRequestID
+    verified_origin: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -1633,6 +1673,12 @@ class EthereumConfidentialCoinRequestWithPaymentInfoAndEthrereumRequestID:
     payment: Wei
     op_cost: Wei
     ethereum_request_id: EthereumRequestID
+
+
+def convert_address_to_bytes(address: str) -> bytes:
+    if address.startswith("0x"):
+        address = address[2:]
+    return bytes.fromhex(address.zfill(40))
 
 
 async def retrieve_request_for_new_request_event(
@@ -1660,6 +1706,9 @@ async def retrieve_request_for_new_request_event(
                     payment=Wei(req[1]),
                     op_cost=Wei(req[2]),
                     ethereum_request_id=new_request_event.request_id,
+                    verified_origin=convert_address_to_bytes(
+                        new_request_event.verified_origin
+                    ),
                 )
             except Exception as e:
                 raise ValueError(f"Error while converting request: {e}")
@@ -1677,6 +1726,9 @@ async def retrieve_request_for_new_request_event(
                     payment=Wei(req[1]),
                     op_cost=Wei(req[2]),
                     ethereum_request_id=new_request_event.request_id,
+                    verified_origin=convert_address_to_bytes(
+                        new_request_event.verified_origin
+                    ),
                 )
             except Exception as e:
                 raise ValueError(f"Error while converting request: {e}")
@@ -1695,6 +1747,9 @@ async def retrieve_request_for_new_request_event(
                     payment=Wei(req[1]),
                     op_cost=Wei(req[2]),
                     ethereum_request_id=new_request_event.request_id,
+                    verified_origin=convert_address_to_bytes(
+                        new_request_event.verified_origin
+                    ),
                 )
             except Exception as e:
                 raise ValueError(f"Error while converting request: {e}")
@@ -1965,14 +2020,22 @@ async def get_new_request_events(
                 new_request_events.append(
                     EthereumNewRequestEvent(
                         request_id=EthereumRequestID(event.args.request_id),
-                        # request_type=event.args.request_type,
                         request_type=encode_to_python_request_type(
                             event.args.request_type
                         ),
+                        verified_origin=event.args.sender,
                     )
                 )
             except Exception as e:
-                logger.error(f"Error while processing event args: {e}. Ignoring event.")
+                logger.error(
+                    LogMessage(
+                        message="Error while processing event args",
+                        structured_log_message_data={
+                            "error": e,
+                            "event_args": event.args,
+                        },
+                    )
+                )
                 pass
         await callback(new_request_events)
     except asyncio.TimeoutError as e:
@@ -1984,6 +2047,7 @@ async def get_new_request_events(
 class EthereumClientNetwork(IClientNetwork):
     __slots__ = (
         "_config",
+        "_fetched_requests_lock",
         "_fetched_requests",
         "_request_queue",
         "_response_queue",
@@ -1996,6 +2060,7 @@ class EthereumClientNetwork(IClientNetwork):
     )
 
     _config: EthereumClientConfig
+    _fetched_requests_lock: Lock
     _fetched_requests: Dict[
         str,
         EthereumRequestWithPaymentInfoAndEthrereumRequestID
@@ -2047,6 +2112,7 @@ class EthereumClientNetwork(IClientNetwork):
         self._response_queue.put(response)
 
     def _init(self) -> None:
+        self._fetched_requests_lock = Lock()
         self._fetched_requests = {}
         self._request_queue = Queue()
         self._response_queue = Queue()
@@ -2059,17 +2125,16 @@ class EthereumClientNetwork(IClientNetwork):
                 self._fetched_requests,
                 self._request_queue,
             ),
-            daemon=True,
         )
         self._response_sender_thread = Thread(
             target=self._wrap_async_function,
             args=(
                 self._response_sender_wrapper,
+                self._fetched_requests_lock,
                 self._fetched_requests,
                 self._request_queue,
                 self._response_queue,
             ),
-            daemon=True,
         )
 
     def _read_abi(self, file_path: str) -> Any:
@@ -2103,12 +2168,12 @@ class EthereumClientNetwork(IClientNetwork):
         logging.getLogger("requests").setLevel(logging.ERROR)
         logging.getLogger("urllib3").setLevel(logging.ERROR)
         websocket_kwargs = {
-            "ping_interval": 30,  # Send a ping every 30 seconds
-            "ping_timeout": 10,  # Wait 10 seconds for pong response
+            "ping_interval": 30,
+            "ping_timeout": 10,
         }
         if self._config.provider.startswith("wss://"):
             ssl_context = ssl.create_default_context()
-            websocket_kwargs["ssl"] = ssl_context
+            websocket_kwargs["ssl"] = ssl_context  # type: ignore
 
         web3 = AsyncWeb3(
             WebSocketProvider(
@@ -2119,7 +2184,15 @@ class EthereumClientNetwork(IClientNetwork):
         try:
             await web3.provider.connect()
         except Exception as e:
-            self._logger.error(f"Error connecting to provider: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error connecting to WebSocket provider",
+                    structured_log_message_data={
+                        "provider": self._config.provider,
+                        "error": e,
+                    },
+                )
+            )
             raise ValueError(
                 f"Unable to connect to WebSocket provider at {self._config.provider}"
             )
@@ -2203,7 +2276,14 @@ class EthereumClientNetwork(IClientNetwork):
                 if reinit_req:
                     self._logger.info("Reinitializing request fetcher")
         except Exception as e:
-            self._logger.error(f"Error in request fetcher: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error in request fetcher",
+                    structured_log_message_data={
+                        "error": e,
+                    },
+                )
+            )
             raise ValueError(f"Error in request fetcher: {e}")
         finally:
             self._logger.info("Request fetcher stopped")
@@ -2223,30 +2303,40 @@ class EthereumClientNetwork(IClientNetwork):
         try:
             contract = await self._init_contract()
         except Exception as e:
-            self._logger.error(f"Error initializing contract: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error initializing contract",
+                    structured_log_message_data={
+                        "error": e,
+                    },
+                )
+            )
             return False
 
         async def putter(events):
             # this can block for large time ,the timeout is on each fetch
             requests = await retrieve_requests_for_new_request_events(contract, events)
             for request in requests:
-                # native_req = convert_to_native_request(request.request)
                 if isinstance(
                     request, EthereumRequestWithPaymentInfoAndEthrereumRequestID
                 ):
-                    native_req = convert_to_native_request(request.request)
+                    native_req = convert_to_native_request(
+                        request.request, request.verified_origin
+                    )
                 elif isinstance(
                     request,
                     EthereumDataRetrievalRequestWithPaymentInfoAndEthrereumRequestID,
                 ):
                     native_req = convert_to_native_data_retrieval_request(
-                        request.request
+                        request.request, request.verified_origin
                     )
                 elif isinstance(
                     request,
                     EthereumDataStoreRequestWithPaymentInfoAndEthrereumRequestID,
                 ):
-                    native_req = convert_to_native_data_store_request(request.request)
+                    native_req = convert_to_native_data_store_request(
+                        request.request, request.verified_origin
+                    )
                 elif isinstance(
                     request,
                     EthereumConfidentialCoinRequestWithPaymentInfoAndEthrereumRequestID,
@@ -2258,7 +2348,7 @@ class EthereumClientNetwork(IClientNetwork):
                     raise ValueError("Invalid request type")
                 fetched_requests[native_req.id] = request
                 request_queue.put(native_req)
-        
+
         try:
             event_filter = await get_new_request_events_filter(contract)
             continous_error_count = 0
@@ -2277,7 +2367,12 @@ class EthereumClientNetwork(IClientNetwork):
                         )
                         return True
                     self._logger.error(
-                        f"Error while fetching request: {e}. Retrying in 5 second"
+                        LogMessage(
+                            message="Error while fetching requests, retrying in 5 seconds",
+                            structured_log_message_data={
+                                "error": e,
+                            },
+                        )
                     )
                     continous_error_count += 1
                     if continous_error_count > 5:
@@ -2292,7 +2387,14 @@ class EthereumClientNetwork(IClientNetwork):
                     await asyncio.sleep(1)
             return False
         except Exception as e:
-            self._logger.error(f"Error in request fetcher: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error while fetching requests",
+                    structured_log_message_data={
+                        "error": e,
+                    },
+                )
+            )
             if not (await self._fetcher_web3.is_connected()):
                 self._logger.error(
                     "WebSocket connection lost. Waiting for reestablishment..."
@@ -2300,9 +2402,9 @@ class EthereumClientNetwork(IClientNetwork):
                 return True
             raise
 
-
     async def _response_sender_wrapper(
         self,
+        fetched_requests_lock: Lock,
         fetched_requests: Dict[
             str,
             EthereumRequestWithPaymentInfoAndEthrereumRequestID
@@ -2317,18 +2419,29 @@ class EthereumClientNetwork(IClientNetwork):
             reinit_req = True
             while reinit_req:
                 reinit_req = await self._response_sender(
-                    fetched_requests, request_queue, response_queue
+                    fetched_requests_lock,
+                    fetched_requests,
+                    request_queue,
+                    response_queue,
                 )
                 if reinit_req:
                     self._logger.info("Reinitializing response sender")
         except Exception as e:
-            self._logger.error(f"Error in response sender: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error in response sender",
+                    structured_log_message_data={
+                        "error": e,
+                    },
+                )
+            )
             raise ValueError(f"Error in response sender: {e}")
         finally:
             self._logger.info("Response sender stopped")
 
     async def _response_sender(
         self,
+        fetched_request_lock: Lock,
         fetched_requests: Dict[
             str,
             EthereumRequestWithPaymentInfoAndEthrereumRequestID
@@ -2343,7 +2456,14 @@ class EthereumClientNetwork(IClientNetwork):
         try:
             submitter = await self._init_submitter()
         except Exception as e:
-            self._logger.error(f"Error initializing submitter: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error initializing submitter",
+                    structured_log_message_data={
+                        "error": e,
+                    },
+                )
+            )
             raise
 
         try:
@@ -2352,7 +2472,14 @@ class EthereumClientNetwork(IClientNetwork):
                 *await self._get_price(),
             )
         except Exception as e:
-            self._logger.error(f"Error setting prices: {e}")
+            self._logger.error(
+                LogMessage(
+                    message="Error setting prices",
+                    structured_log_message_data={
+                        "error": e,
+                    },
+                )
+            )
             if not (await self._sender_web3.is_connected()):
                 self._logger.error(
                     "WebSocket connection lost. Waiting for reestablishment..."
@@ -2429,7 +2556,8 @@ class EthereumClientNetwork(IClientNetwork):
                         raise ValueError("Invalid request type")
 
                     if response.status != ResponseStatus.ACCEPTED:
-                        fetched_requests.pop(response.request_id)
+                        with fetched_request_lock:
+                            fetched_requests.pop(response.request_id, None)
                 self._response_queue.put(None)  # type: ignore
             except Exception as e:
                 if not (await self._sender_web3.is_connected()):
@@ -2441,7 +2569,7 @@ class EthereumClientNetwork(IClientNetwork):
                     LogMessage(
                         message="Error while sending response",
                         structured_log_message_data={
-                            "error": str(e),
+                            "error": e,
                             "request_id": response.request_id,
                         },
                     )

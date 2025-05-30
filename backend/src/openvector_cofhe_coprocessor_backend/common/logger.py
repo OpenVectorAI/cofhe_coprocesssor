@@ -6,16 +6,16 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import IntEnum
 import datetime as dt
 import json
 import logging
 import logging.config
-from typing import overload
+from typing import Any, Dict, overload
 
 
-class LogLevel(Enum):
-    """Enum for log levels. The lower the value, the more verbose the log message."""
+class LogLevel(IntEnum):
+    """IntEnum for log levels. The lower the value, the more verbose the log message."""
 
     TRACE = -1
     """Trace log level. Should be used for development purposes only."""
@@ -53,7 +53,7 @@ class LogMessage:
 
     message: str
     level: LogLevel = LogLevel.INFO
-    structured_log_message_data: dict[str, str] = field(default_factory=dict)
+    structured_log_message_data: Dict[str, Any] = field(default_factory=dict)
     error: Exception | None = None
     stacklevel: int = 1
 
@@ -125,7 +125,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.TRACE
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "TRACE"
         self._trace(message)
 
@@ -156,7 +156,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.INFO
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "INFO"
         self._info(message)
 
@@ -187,7 +187,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.DEBUG
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "DEBUG"
         self._debug(message)
 
@@ -219,7 +219,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.WARNING
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "WARNING"
         self._warning(message)
 
@@ -251,7 +251,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.ERROR
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "ERROR"
         self._error(message)
 
@@ -283,7 +283,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.CRITICAL
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "CRITICAL"
         self._critical(message)
 
@@ -315,7 +315,7 @@ class Logger(ABC):
         if isinstance(message, str):
             message = LogMessage(message=message, level=self._min_level)
         message.level = LogLevel.FATAL
-        message.stacklevel += 1
+        message.stacklevel += 2
         message.structured_log_message_data["log_level"] = "FATAL"
         exit_code = message.structured_log_message_data.get("exit_code", 1)
         self._fatal(message)

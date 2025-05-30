@@ -117,7 +117,11 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
             op_cost: (price + BASE_GAS_COST + request.payment_callback_gas)
         });
 
-        emit CRTT.NewRequest(last_request_id, CRTT.RequestType.OPERATION);
+        emit CRTT.NewRequest(
+            last_request_id,
+            CRTT.RequestType.OPERATION,
+            msg.sender
+        );
         console.log(
             "Request emitted for request %d",
             CRTT.requestIDToUint128(last_request_id)
@@ -159,7 +163,8 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
 
         emit CRTT.NewRequest(
             last_data_request_id,
-            CRTT.RequestType.DATA_RETRIEVAL
+            CRTT.RequestType.DATA_RETRIEVAL,
+            msg.sender
         );
         console.log(
             "Data Retrieval Request emitted, for request %d",
@@ -200,7 +205,8 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
 
         emit CRTT.NewRequest(
             last_data_store_request_id,
-            CRTT.RequestType.DATA_STORE
+            CRTT.RequestType.DATA_STORE,
+            msg.sender
         );
         console.log(
             "Data Store Request emitted for request %d",
@@ -241,7 +247,8 @@ contract OpenVectorCOFHEExecutor is Ownable, COFHExecutor {
 
         emit CRTT.NewRequest(
             last_confidential_coin_request_id,
-            CRTT.RequestType.CONFIDENTIAL_COIN
+            CRTT.RequestType.CONFIDENTIAL_COIN,
+            msg.sender
         );
         console.log(
             "ConfidentialCoin Request emitted for request %d",

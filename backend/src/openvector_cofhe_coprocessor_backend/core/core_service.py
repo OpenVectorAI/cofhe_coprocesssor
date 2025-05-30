@@ -3,23 +3,18 @@ from base64 import b64decode, b64encode
 from datetime import datetime
 import json
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from openvector_cofhe_coprocessor_backend.common.logger import LogMessage, Logger
 from typing_extensions import override
-from abc import ABC, abstractmethod
 
 from dataclasses import dataclass
 from queue import Queue
-from threading import Thread, Event
+from threading import Lock, Thread, Event
 import asyncio
 import uuid
-import random
 
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
-
-from openvector_cofhe_coprocessor_backend.core.request_response import (
+from openvector_cofhe_coprocessor_backend.common.request_response import (
     Operation,
     DataType,
     OperandLocation,
@@ -32,7 +27,7 @@ from openvector_cofhe_coprocessor_backend.core.request_response import (
     ConfidentialCoinResponse,
 )
 
-from openvector_cofhe_coprocessor_backend.common.storage import Storage, FileStorage
+from openvector_cofhe_coprocessor_backend.core.storage import Storage, FileStorage
 
 from pycofhe.cryptosystems import CPUCryptoSystemCipherText as CipherText
 from pycofhe.network import make_cpu_cryptosystem_client_node, CPUCryptoSystemClientNode
@@ -44,7 +39,6 @@ from pycofhe.network import (
     ComputeOperationOperand as PyCOFHEComputeOperationOperand,
     ComputeOperationInstance as PyCOFHEComputeOperationInstance,
     ComputeRequest as PyCOFHEComputeRequest,
-    ComputeResponse as PyCOFHEComputeResponse,
     encrypt_bit as encrypt_single,
     decrypt_bit as decrypt_single,
     decrypt_bitwise,
@@ -61,33 +55,9 @@ from pycofhe.network import (
     deserialize_bitwise,
     native_transfer_func,
 )
-
-
-class ICoreService(ABC):
-    @abstractmethod
-    def run(self) -> None:
-        """Run the core service"""
-        pass
-
-    @abstractmethod
-    def stop(self) -> None:
-        """Stop the core service"""
-        pass
-
-    @abstractmethod
-    def submit_request(self, request: Request | ConfidentialCoinRequest) -> str:
-        """Process the request"""
-        pass
-
-    @abstractmethod
-    def response_available(self) -> bool:
-        """Check the response"""
-        pass
-
-    @abstractmethod
-    def get_response(self) -> Response | ConfidentialCoinResponse:
-        """Get the response"""
-        pass
+from openvector_cofhe_coprocessor_backend.core.core_service_interface import (
+    ICoreService,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,12 +78,14 @@ class CPUCryptoSystemClientNodeWrapper:
         "_client_node",
         "_storage",
         "_logger",
+        "_eagerly_evaluated_confidential_coin_request_responses_lock",
         "_eagerly_evaluated_confidential_coin_request_responses",
     )
 
     _client_node: CPUCryptoSystemClientNode
     _storage: Storage
     _logger: Logger
+    _eagerly_evaluated_confidential_coin_request_responses_lock: Lock
     _eagerly_evaluated_confidential_coin_request_responses: Dict[
         str, ConfidentialCoinResponse
     ]
@@ -127,6 +99,7 @@ class CPUCryptoSystemClientNodeWrapper:
         self._client_node = client_node
         self._storage = storage
         self._logger = logger
+        self._eagerly_evaluated_confidential_coin_request_responses_lock = Lock()
         self._eagerly_evaluated_confidential_coin_request_responses = {}
 
     async def get_optimistic_result(self, request: Request) -> Operand:
@@ -161,13 +134,13 @@ class CPUCryptoSystemClientNodeWrapper:
 
             return await self._handle_request(accepted_response, request)
         except NotImplementedError as e:
-            self._logger.error(
+            self._logger.debug(
                 LogMessage(
                     message="Error processing request, operation not supported/implemented",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "accepted_response": str(accepted_response),
-                        "error": str(e),
+                        "accepted_response": accepted_response.model_dump_json(),
+                        "error": e,
                     },
                 )
             )
@@ -179,13 +152,13 @@ class CPUCryptoSystemClientNodeWrapper:
                 correlation_response_id=accepted_response.id,
             )
         except KeyError as e:
-            self._logger.error(
+            self._logger.debug(
                 LogMessage(
                     message="Error processing request, storage key not found",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "accepted_response": str(accepted_response),
-                        "error": str(e),
+                        "accepted_response": accepted_response.model_dump_json(),
+                        "error": e,
                     },
                 )
             )
@@ -197,13 +170,13 @@ class CPUCryptoSystemClientNodeWrapper:
                 correlation_response_id=accepted_response.id,
             )
         except ValueError as e:
-            self._logger.error(
+            self._logger.debug(
                 LogMessage(
                     message="Error processing request, invalid operand",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "accepted_response": str(accepted_response),
-                        "error": str(e),
+                        "accepted_response": accepted_response.model_dump_json(),
+                        "error": e,
                     },
                 )
             )
@@ -220,8 +193,8 @@ class CPUCryptoSystemClientNodeWrapper:
                     message="Error processing request",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "accepted_response": str(accepted_response),
-                        "error": str(e),
+                        "accepted_response": accepted_response.model_dump_json(),
+                        "error": e,
                     },
                 )
             )
@@ -259,19 +232,19 @@ class CPUCryptoSystemClientNodeWrapper:
         self._logger.debug(f"Processing transfer request {request.id}")
 
         if request.consider_amount_negative:
-            self._logger.error(
+            self._logger.debug(
                 LogMessage(
                     message="Invalid transfer request",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "consider_amount_negative": str(
-                            request.consider_amount_negative
-                        ),
+                        "consider_amount_negative": request.consider_amount_negative,
                     },
                 )
             )
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.INVALID_DATA_TYPE,
@@ -280,7 +253,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=request.receiver_balance_storage_key,
                     correlation_response_id=response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=response_id,
                 request_id=request.id,
@@ -298,9 +270,10 @@ class CPUCryptoSystemClientNodeWrapper:
                 data=request.sender_balance_storage_key,
             )
         )
-        if not request.receiver_balance_storage_key or all(
+        receiver_not_registered = (not request.receiver_balance_storage_key) or all(
             b == 0 for b in request.receiver_balance_storage_key
-        ):
+        )
+        if receiver_not_registered:
             receiver_balance: CipherText | List[CipherText] = encrypt_single(
                 self._client_node.cryptosystem,
                 self._client_node.network_encryption_key,
@@ -353,8 +326,10 @@ class CPUCryptoSystemClientNodeWrapper:
                     },
                 )
             )
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.INVALID_DATA_TYPE,
@@ -363,7 +338,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=request.receiver_balance_storage_key,
                     correlation_response_id=response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=response_id,
                 request_id=request.id,
@@ -383,9 +357,20 @@ class CPUCryptoSystemClientNodeWrapper:
                 message="Transfer request processed",
                 structured_log_message_data={
                     "request_id": request.id,
-                    "success": str(sucess),
-                    "new_balances": str(new_balances),
-                    "processing_time": str(end_time - start_time),
+                    "success": sucess,
+                    "new_balances": [
+                        b64encode(
+                            serialize_single(
+                                self._client_node.cryptosystem, new_balances[0]
+                            )
+                        ).decode("ascii"),
+                        b64encode(
+                            serialize_single(
+                                self._client_node.cryptosystem, new_balances[1]
+                            )
+                        ).decode("ascii"),
+                    ],
+                    "processing_time": end_time - start_time,
                 },
             )
         )
@@ -394,8 +379,10 @@ class CPUCryptoSystemClientNodeWrapper:
             self._logger.debug(
                 f"Transfer request failed {request.id} because of insufficient balance"
             )
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.SUCCESS,
@@ -404,7 +391,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=request.receiver_balance_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
 
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
@@ -430,19 +416,32 @@ class CPUCryptoSystemClientNodeWrapper:
 
         new_sender_balance_storage_key = self._get_new_storage_key()
         new_receiver_balance_storage_key = self._get_new_storage_key()
-        self._save_operand(new_sender_balance_storage_key, new_sender_balance)
-        self._save_operand(new_receiver_balance_storage_key, new_receiver_balance)
-        self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-            ConfidentialCoinResponse(
-                id=uuid.uuid4().hex,
-                request_id=request.id,
-                status=ResponseStatus.SUCCESS,
-                success=True,
-                sender_balance_storage_key=new_sender_balance_storage_key,
-                receiver_balance_storage_key=new_receiver_balance_storage_key,
-                correlation_response_id=correlation_response_id,
-            )
+        self._save_operand(
+            new_sender_balance_storage_key,
+            new_sender_balance,
+            self._get_acl_for_storage_key(request.sender_balance_storage_key),
         )
+        self._save_operand(
+            new_receiver_balance_storage_key,
+            new_receiver_balance,
+            (
+                request.receiver_balance_storage_key_acl
+                if receiver_not_registered
+                else self._get_acl_for_storage_key(request.receiver_balance_storage_key)
+            ),
+        )
+        with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.SUCCESS,
+                    success=True,
+                    sender_balance_storage_key=new_sender_balance_storage_key,
+                    receiver_balance_storage_key=new_receiver_balance_storage_key,
+                    correlation_response_id=correlation_response_id,
+                )
+            )
 
         return ConfidentialCoinResponse(
             id=correlation_response_id,
@@ -480,13 +479,13 @@ class CPUCryptoSystemClientNodeWrapper:
             b == 0 for b in request.receiver_balance_storage_key
         )
         if is_total_amount_zero and (not is_minter_balance_zero):
-            self._logger.error(
+            self._logger.debug(
                 LogMessage(
                     message="Invalid mint request",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "is_total_amount_zero": str(is_total_amount_zero),
-                        "is_minter_balance_zero": str(is_minter_balance_zero),
+                        "is_total_amount_zero": is_total_amount_zero,
+                        "is_minter_balance_zero": is_minter_balance_zero,
                     },
                 )
             )
@@ -506,18 +505,29 @@ class CPUCryptoSystemClientNodeWrapper:
                 ),
             )
             new_total_amount_storage_key = self._get_new_storage_key()
-            self._save_operand(new_total_amount_storage_key, new_total_amount)
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            new_receiver_amount_storage_key = self._get_new_storage_key()
+            self._save_operand(
+                new_total_amount_storage_key,
+                new_total_amount,
+                request.sender_balance_storage_key_acl,
+            )
+            self._save_operand(
+                new_receiver_amount_storage_key,
+                new_total_amount,
+                request.receiver_balance_storage_key_acl,
+            )
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.SUCCESS,
                     success=True,
                     sender_balance_storage_key=new_total_amount_storage_key,
-                    receiver_balance_storage_key=new_total_amount_storage_key,
+                    receiver_balance_storage_key=new_receiver_amount_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
                 request_id=request.id,
@@ -564,10 +574,22 @@ class CPUCryptoSystemClientNodeWrapper:
             )
             new_total_amount_storage_key = self._get_new_storage_key()
             new_receiver_amount_storage_key = self._get_new_storage_key()
-            self._save_operand(new_total_amount_storage_key, new_total_amount)
-            self._save_operand(new_receiver_amount_storage_key, new_receiver_amount)
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            self._save_operand(
+                new_total_amount_storage_key,
+                new_total_amount,
+                self._get_acl_for_storage_key(
+                    request.sender_balance_storage_key,
+                ),
+            )
+            self._save_operand(
+                new_receiver_amount_storage_key,
+                new_receiver_amount,
+                request.receiver_balance_storage_key_acl,
+            )
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.SUCCESS,
@@ -576,7 +598,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=new_receiver_amount_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
                 request_id=request.id,
@@ -631,10 +652,24 @@ class CPUCryptoSystemClientNodeWrapper:
             )
             new_total_amount_storage_key = self._get_new_storage_key()
             new_minter_amount_storage_key = self._get_new_storage_key()
-            self._save_operand(new_total_amount_storage_key, new_total_amount)
-            self._save_operand(new_minter_amount_storage_key, new_minter_amount)
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            self._save_operand(
+                new_total_amount_storage_key,
+                new_total_amount,
+                self._get_acl_for_storage_key(
+                    request.sender_balance_storage_key,
+                ),
+            )
+            self._save_operand(
+                new_minter_amount_storage_key,
+                new_minter_amount,
+                self._get_acl_for_storage_key(
+                    request.receiver_balance_storage_key,
+                ),
+            )
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.SUCCESS,
@@ -643,7 +678,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=new_minter_amount_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
                 request_id=request.id,
@@ -673,18 +707,20 @@ class CPUCryptoSystemClientNodeWrapper:
             b == 0 for b in request.receiver_balance_storage_key
         )
         if is_total_amount_zero or is_minter_balance_zero:
-            self._logger.error(
+            self._logger.debug(
                 LogMessage(
                     message="Invalid deduction request",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "is_total_amount_zero": str(is_total_amount_zero),
-                        "is_minter_balance_zero": str(is_minter_balance_zero),
+                        "is_total_amount_zero": is_total_amount_zero,
+                        "is_minter_balance_zero": is_minter_balance_zero,
                     },
                 )
             )
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.SUCCESS,
@@ -693,7 +729,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=request.receiver_balance_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
                 request_id=request.id,
@@ -743,23 +778,64 @@ class CPUCryptoSystemClientNodeWrapper:
                     message="Invalid operand types for deduction request",
                     structured_log_message_data={
                         "request_id": request.id,
-                        "is_current_total_amount_corrupted": str(
-                            not isinstance(current_total_amount, CipherText)
+                        "is_current_total_amount_corrupted": not isinstance(
+                            current_total_amount, CipherText
                         ),
-                        "is_current_minter_amount_corrupted": str(
-                            not isinstance(current_minter_amount, CipherText)
+                        "is_current_minter_amount_corrupted": not isinstance(
+                            current_minter_amount, CipherText
                         ),
-                        "is_deduction_amount_corrupted": str(
-                            not isinstance(deduction_amount, CipherText)
+                        "is_deduction_amount_corrupted": not isinstance(
+                            deduction_amount, CipherText
                         ),
-                        "current_total_amount": str(current_total_amount),
-                        "current_minter_amount": str(current_minter_amount),
-                        "deduction_amount": str(deduction_amount),
+                        "current_total_amount": (
+                            b64encode(
+                                serialize_single(
+                                    self._client_node.cryptosystem, current_total_amount
+                                )
+                            ).decode("ascii")
+                            if isinstance(current_total_amount, CipherText)
+                            else b64encode(
+                                serialize_bitwise(
+                                    self._client_node.cryptosystem, current_total_amount
+                                )
+                            ).decode("ascii")
+                        ),
+                        "current_minter_amount": (
+                            b64encode(
+                                serialize_single(
+                                    self._client_node.cryptosystem,
+                                    current_minter_amount,
+                                )
+                            ).decode("ascii")
+                            if isinstance(current_minter_amount, CipherText)
+                            else b64encode(
+                                serialize_bitwise(
+                                    self._client_node.cryptosystem,
+                                    current_minter_amount,
+                                )
+                            ).decode("ascii")
+                        ),
+                        "deduction_amount": (
+                            b64encode(
+                                serialize_single(
+                                    self._client_node.cryptosystem, deduction_amount
+                                )
+                            ).decode("ascii")
+                            if isinstance(deduction_amount, CipherText)
+                            else b64encode(
+                                serialize_bitwise(
+                                    self._client_node.cryptosystem, deduction_amount
+                                )
+                            ).decode("ascii")
+                        ),
+                        "deduction_amount": deduction_amount,
                     },
                 )
             )
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.INVALID_DATA_TYPE,
@@ -768,7 +844,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=request.receiver_balance_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
                 request_id=request.id,
@@ -791,8 +866,10 @@ class CPUCryptoSystemClientNodeWrapper:
             self._logger.debug(
                 f"Deduction request failed {request.id} because of insufficient balance"
             )
-            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-                ConfidentialCoinResponse(
+            with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+                self._eagerly_evaluated_confidential_coin_request_responses[
+                    request.id
+                ] = ConfidentialCoinResponse(
                     id=uuid.uuid4().hex,
                     request_id=request.id,
                     status=ResponseStatus.SUCCESS,
@@ -801,7 +878,6 @@ class CPUCryptoSystemClientNodeWrapper:
                     receiver_balance_storage_key=request.receiver_balance_storage_key,
                     correlation_response_id=correlation_response_id,
                 )
-            )
             return ConfidentialCoinResponse(
                 id=correlation_response_id,
                 request_id=request.id,
@@ -838,19 +914,32 @@ class CPUCryptoSystemClientNodeWrapper:
 
         new_total_amount_storage_key = self._get_new_storage_key()
         new_minter_amount_storage_key = self._get_new_storage_key()
-        self._save_operand(new_total_amount_storage_key, new_total_amount)
-        self._save_operand(new_minter_amount_storage_key, new_minter_amount)
-        self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
-            ConfidentialCoinResponse(
-                id=uuid.uuid4().hex,
-                request_id=request.id,
-                status=ResponseStatus.SUCCESS,
-                success=True,
-                sender_balance_storage_key=new_total_amount_storage_key,
-                receiver_balance_storage_key=new_minter_amount_storage_key,
-                correlation_response_id=correlation_response_id,
-            )
+        self._save_operand(
+            new_total_amount_storage_key,
+            new_total_amount,
+            self._get_acl_for_storage_key(
+                request.sender_balance_storage_key,
+            ),
         )
+        self._save_operand(
+            new_minter_amount_storage_key,
+            new_minter_amount,
+            self._get_acl_for_storage_key(
+                request.receiver_balance_storage_key,
+            ),
+        )
+        with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+            self._eagerly_evaluated_confidential_coin_request_responses[request.id] = (
+                ConfidentialCoinResponse(
+                    id=uuid.uuid4().hex,
+                    request_id=request.id,
+                    status=ResponseStatus.SUCCESS,
+                    success=True,
+                    sender_balance_storage_key=new_total_amount_storage_key,
+                    receiver_balance_storage_key=new_minter_amount_storage_key,
+                    correlation_response_id=correlation_response_id,
+                )
+            )
         return ConfidentialCoinResponse(
             id=correlation_response_id,
             request_id=request.id,
@@ -868,24 +957,25 @@ class CPUCryptoSystemClientNodeWrapper:
         if accepted_response.status != ResponseStatus.ACCEPTED:
             raise ValueError("Invalid response status")
 
-        if (
-            request.id
-            not in self._eagerly_evaluated_confidential_coin_request_responses
-        ):
-            self._logger.error(
-                LogMessage(
-                    message="Invalid request id",
-                    structured_log_message_data={
-                        "request_id": request.id,
-                        "accepted_response": str(accepted_response),
-                    },
+        with self._eagerly_evaluated_confidential_coin_request_responses_lock:
+            if (
+                request.id
+                not in self._eagerly_evaluated_confidential_coin_request_responses
+            ):
+                self._logger.error(
+                    LogMessage(
+                        message="Invalid request id",
+                        structured_log_message_data={
+                            "request_id": request.id,
+                            "accepted_response": accepted_response.model_dump_json(),
+                        },
+                    )
                 )
-            )
-            raise ValueError("Invalid request id")
+                raise ValueError("Invalid request id")
 
-        return self._eagerly_evaluated_confidential_coin_request_responses.pop(
-            request.id
-        )
+            return self._eagerly_evaluated_confidential_coin_request_responses.pop(
+                request.id
+            )
 
     async def _handle_retrieve(
         self, accepted_response: Response, request: Request
@@ -909,6 +999,19 @@ class CPUCryptoSystemClientNodeWrapper:
             and request.op1.encryption_scheme != OperandEncryptionScheme.RSA
         ):
             raise ValueError("Invalid encryption scheme")
+        if (
+            request.verified_origin
+            not in self._get_acl_for_storage_key(request.op1.data)
+        ) and (
+            not self._open_for_everyone(self._get_acl_for_storage_key(request.op1.data))
+        ):
+            return Response(
+                id=uuid.uuid4().hex,
+                request_id=request.id,
+                status=ResponseStatus.SUCCESS,
+                result=None,
+                correlation_response_id=accepted_response.id,
+            )
 
         op = self._get_operand(request.op1.data)
         opc = self._get_cofhe_operand(op)
@@ -974,7 +1077,11 @@ class CPUCryptoSystemClientNodeWrapper:
             if request.op1.data_type != DataType.REENCRYPTION_KEY:
                 raise ValueError("Invalid encryption scheme")
 
-        self._save_operand(self._get_storage_key(accepted_response.result), request.op1)
+        self._save_operand(
+            self._get_storage_key(accepted_response.result),
+            request.op1,
+            [request.verified_origin],
+        )
         return Response(
             id=uuid.uuid4().hex,
             request_id=request.id,
@@ -1033,7 +1140,21 @@ class CPUCryptoSystemClientNodeWrapper:
             result,
         )
         new_storage_key = self._get_storage_key(accepted_response.result)
-        self._save_operand(new_storage_key, result_p)
+        perms: list[bytes] = [request.verified_origin]
+        if (
+            request.op1.location == OperandLocation.STORAGE_KEY
+            and request.op2.location == OperandLocation.STORAGE_KEY
+        ):
+            perms = self._get_acl_and(
+                self._get_acl_for_storage_key(request.op1.data),
+                self._get_acl_for_storage_key(request.op2.data),
+            )
+        if request.op1.location == OperandLocation.STORAGE_KEY:
+            perms = self._get_acl_for_storage_key(request.op1.data)
+        if request.op2.location == OperandLocation.STORAGE_KEY:
+            perms = self._get_acl_for_storage_key(request.op2.data)
+
+        self._save_operand(new_storage_key, result_p, perms)
         result_p = self._make_operand(
             result_p.data_type,
             OperandLocation.STORAGE_KEY,
@@ -1171,29 +1292,45 @@ class CPUCryptoSystemClientNodeWrapper:
             return self._deserialize_operand(self._storage.get(storage_key_str))
         raise KeyError(f"Storage key {storage_key_str} not found")
 
-    def _save_operand(self, key: bytes, op: Operand) -> None:
+    def _save_operand(self, key: bytes, op: Operand, acl: List[bytes]) -> None:
+        # if acl is empty save [b""]
+        # the b"" represents everyone has access to the operand
+        if not acl:
+            acl = [b""]
         key_str = key.hex()
         self._logger.debug(
             LogMessage(
                 message="Saving operand",
                 structured_log_message_data={
                     "key": key_str,
-                    "operand": str(op),
+                    "operand": json.dumps(self._make_operand_dict(op, acl)),
                 },
             )
         )
-        self._storage.put(key_str, self._serialize_operand(op))
+        self._storage.put(key_str, self._serialize_operand(op, acl))
 
-    def _serialize_operand(self, op: Operand) -> str:
+    def _get_acl_for_storage_key(self, storage_key: bytes) -> List[bytes]:
+        storage_key_str = self._convert_bytes_to_storage_key(storage_key).hex()
+        if self._storage.check(storage_key_str):
+            data = json.loads(self._storage.get(storage_key_str))
+            self._verify_operand_data(data)
+            return [b64decode(a) for a in data["acl"]]
+        raise KeyError(f"Storage key {storage_key_str} not found")
+
+    def _open_for_everyone(self, acl: List[bytes]) -> bool:
+        if b"" in acl:
+            return True
+        return False
+
+    def _get_acl_and(self, acl1: List[bytes], acl2: List[bytes]) -> List[bytes]:
+        return list(set(acl1) & set(acl2))
+
+    def _serialize_operand(self, op: Operand, acl: List[bytes]) -> str:
         # The format is json, with operand properties as keys and values as values
-        ser = self._make_operand_dict(op)
-        ser["data"] = b64encode(ser["data"]).decode("ascii")
-        return json.dumps(ser)
+        return json.dumps(self._make_operand_dict(op, acl))
 
     def _deserialize_operand(self, data: str) -> Operand:
-        loaded_obj = json.loads(data)
-        loaded_obj["data"] = b64decode(loaded_obj["data"])
-        return self._make_operand_from_dict(loaded_obj)
+        return self._make_operand_from_dict(json.loads(data))
 
     def _make_operand(
         self,
@@ -1213,29 +1350,74 @@ class CPUCryptoSystemClientNodeWrapper:
             data=ac_data,
         )
 
-    def _make_operand_dict(self, op: Operand) -> dict:
+    def _make_operand_dict(self, op: Operand, acl: List[bytes]) -> dict:
         return {
             "data_type": op.data_type.value,
             "location": op.location.value,
             "encryption_scheme": op.encryption_scheme.value,
-            "data": op.data,
+            "data": b64encode(op.data).decode("ascii"),
+            "acl": [b64encode(a).decode("ascii") for a in acl],
         }
 
     def _make_operand_from_dict(self, data: dict) -> Operand:
-        if "data" not in data:
-            raise ValueError("Invalid operand data")
-        if "encryption_scheme" not in data:
-            raise ValueError("Invalid operand encryption scheme")
-        if "location" not in data:
-            raise ValueError("Invalid operand location")
-        if "data_type" not in data:
-            raise ValueError("Invalid operand data type")
+        self._verify_operand_data(data)
         return Operand(
             data_type=DataType(data["data_type"]),
             location=OperandLocation(data["location"]),
             encryption_scheme=OperandEncryptionScheme(data["encryption_scheme"]),
-            data=data["data"],
+            data=b64decode(data["data"]),
         )
+
+    def _verify_operand_data(self, data: dict) -> None:
+        try:
+            self._verify_operand_data_inner(data)
+        except Exception as e:
+            self._logger.error(
+                LogMessage(
+                    message="Invalid operand data",
+                    structured_log_message_data={
+                        "error": e,
+                        "data": json.dumps(data),
+                    },
+                )
+            )
+            raise e
+
+    def _verify_operand_data_inner(self, data: dict) -> None:
+        if "encryption_scheme" not in data:
+            raise ValueError("Invalid operand encryption scheme")
+        if not isinstance(data["encryption_scheme"], str):
+            raise ValueError("Invalid operand encryption scheme format")
+        try:
+            OperandEncryptionScheme(data["encryption_scheme"])
+        except ValueError:
+            raise ValueError("Invalid operand encryption scheme value")
+        if "location" not in data:
+            raise ValueError("Invalid operand location")
+        if not isinstance(data["location"], str):
+            raise ValueError("Invalid operand location format")
+        try:
+            OperandLocation(data["location"])
+        except ValueError:
+            raise ValueError("Invalid operand location value")
+        if "data_type" not in data:
+            raise ValueError("Invalid operand data type")
+        if not isinstance(data["data_type"], str):
+            raise ValueError("Invalid operand data type format")
+        try:
+            DataType(data["data_type"])
+        except ValueError:
+            raise ValueError("Invalid operand data type value")
+        if "data" not in data:
+            raise ValueError("Invalid operand data")
+        if not isinstance(data["data"], str):
+            raise ValueError("Invalid operand data format")
+        if "acl" not in data:
+            raise ValueError("Invalid operand ACL")
+        if not isinstance(data["acl"], list):
+            raise ValueError("Invalid operand ACL format")
+        if not all(isinstance(a, str) for a in data["acl"]):
+            raise ValueError("Invalid operand ACL format")
 
     def _get_optimistic_storage_key(self, request: Request) -> bytes:
         return self._get_new_storage_key()
@@ -1411,12 +1593,14 @@ class CoreService(ICoreService):
                         "setup_node_ip": config.setup_node_ip,
                         "setup_node_port": config.setup_node_port,
                         "cert_path": config.cert_path,
-                        "error": str(e),
+                        "error": e,
                     },
                 )
             )
             raise ValueError(
-                f"Unable to connect to client node at {config.client_node_ip}:{config.client_node_port}"
+                f"Unable to connect to setup node at {config.setup_node_ip}:{config.setup_node_port} or"
+                + f"client node at {config.client_node_ip}:{config.client_node_port}."
+                + f"Please check the configuration and try again."
             ) from e
 
     def _get_storage(self, config: CoreServiceConfig) -> Storage:
@@ -1437,7 +1621,7 @@ class CoreService(ICoreService):
                         message="Unable to open the storage",
                         structured_log_message_data={
                             "storage_path": config.storage_path,
-                            "error": str(e),
+                            "error": e,
                         },
                     )
                 )
@@ -1454,7 +1638,7 @@ class CoreService(ICoreService):
                     message="Unable to create the storage",
                     structured_log_message_data={
                         "storage_path": config.storage_path,
-                        "error": str(e),
+                        "error": e,
                     },
                 )
             )
@@ -1480,7 +1664,7 @@ class CoreService(ICoreService):
                             message="Processing request",
                             structured_log_message_data={
                                 "request_id": request.request.id,
-                                "request": str(request),
+                                "request": request.request.model_dump_json(),
                             },
                         )
                     )
@@ -1490,7 +1674,7 @@ class CoreService(ICoreService):
                             message="Processing confidential coin request",
                             structured_log_message_data={
                                 "request_id": request.request.id,
-                                "request": str(request),
+                                "request": request.request.model_dump_json(),
                             },
                         )
                     )
@@ -1523,8 +1707,8 @@ class CoreService(ICoreService):
                             message="Error processing request",
                             structured_log_message_data={
                                 "request_id": request.request.id,
-                                "accepted_response": str(request),
-                                "error": str(e),
+                                "request": request.request.model_dump_json(),
+                                "error": e,
                             },
                         )
                     )
@@ -1559,7 +1743,7 @@ class CoreService(ICoreService):
                 message="Accepting request",
                 structured_log_message_data={
                     "request_id": request.request.id,
-                    "request": str(request),
+                    "request": request.request.model_dump_json(),
                 },
             )
         )
@@ -1578,7 +1762,7 @@ class CoreService(ICoreService):
                 message="Accepting confidential coin request",
                 structured_log_message_data={
                     "request_id": request.request.id,
-                    "request": str(request),
+                    "request": request.request.model_dump_json(),
                 },
             )
         )

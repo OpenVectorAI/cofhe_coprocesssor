@@ -1,25 +1,27 @@
 {
-    "client_networks": [
-        "ethereum"
-    ],
-    "core_service": {
-        "client_node_ip": "127.0.0.1",
-        "client_node_port": "4478",
-        "setup_node_ip": "127.0.0.1",
-        "setup_node_port": "4455",
-        "cert_path": "artifacts/server.pem",
-        "storage_path": "storage",
-        "storage_overwrite": true
-    },
-    "logger": {
-        "config_path": "artifacts/log_config.json"
-    },
-    "ethereum": {
-        "provider": "ws://localhost:8545",
-        "contract_address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-        "contract_abi_file_path": "artifacts/openvector_cofhe_executor_contract_abi.json",
-        "owner_account_address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-        "owner_account_private_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        "op_price_file_path": "artifacts/openvector_cofhe_executor_op_price.json"
-    }
+  "client_networks": ["ethereum","web2_http"],
+  "core_service": {
+    "client_node_ip": "127.0.0.1",
+    "client_node_port": "4478",
+    "setup_node_ip": "127.0.0.1",
+    "setup_node_port": "4455",
+    "cert_path": "artifacts/server.pem",
+    "storage_path": "storage",
+    "storage_overwrite": true
+  },
+  "logger": {
+    "config_path": "artifacts/log_config.json"
+  },
+  "ethereum": {
+    "provider": "ws://localhost:8545",
+    "contract_address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "contract_abi_file_path": "artifacts/openvector_cofhe_executor_contract_abi.json",
+    "owner_account_address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "owner_account_private_key": "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    "op_price_file_path": "artifacts/openvector_cofhe_executor_op_price.json"
+  },
+  "web2_http": {
+    "host": "127.0.0.1",
+    "port": 8003
+  }
 }

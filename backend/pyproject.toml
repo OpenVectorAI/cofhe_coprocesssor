@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi[standard]>=0.115.12",
     "jsonschema>=4.23.0",
     "pycofhe",
     "web3>=7.9.0",

@@ -6,9 +6,9 @@ import signal
 import asyncio
 
 from openvector_cofhe_coprocessor_backend.cli import CliArgs
-from openvector_cofhe_coprocessor_backend.common.json_utils import read_json_config
+from openvector_cofhe_coprocessor_backend.common.utils.json_utils import read_json_config
 from openvector_cofhe_coprocessor_backend.common.logger import Logger, StandardLogger
-from openvector_cofhe_coprocessor_backend.core.client_network import IClientNetwork
+from openvector_cofhe_coprocessor_backend.client_networks.client_network_interface import IClientNetwork
 from openvector_cofhe_coprocessor_backend.core.core_service import (
     CoreServiceConfig,
     CoreService,
@@ -17,7 +17,11 @@ from openvector_cofhe_coprocessor_backend.client_networks.ethereum import (
     EthereumClientConfig,
     EthereumClientNetwork,
 )
-from openvector_cofhe_coprocessor_backend.core.request_response import ResponseStatus
+from openvector_cofhe_coprocessor_backend.client_networks.web2_http import (
+    Web2HTTPClientNetwork,
+    Web2HTTPClientNetworkConfig,
+)
+from openvector_cofhe_coprocessor_backend.common.request_response import ResponseStatus
 
 
 config_schema = {
@@ -27,7 +31,7 @@ config_schema = {
             "type": "array",
             "items": {
                 "type": "string",
-                "enum": ["ethereum"],
+                "enum": ["ethereum","web2_http"],
             },
         },
         "core_service": {
@@ -75,6 +79,20 @@ config_schema = {
                 "owner_account_private_key",
             ],
         },
+        "web2_http": {
+            "type": "object",
+            "properties": {
+                "host": {"type": "string"},
+                "port": {"type": "integer"},
+                "ssl_key_path": {"type": "string"},
+                "ssl_cert_path": {"type": "string"},
+            },
+            "required": [
+                "host",
+                "port",
+            ],
+        },
+
     },
     "required": [
         "client_networks",
@@ -147,6 +165,9 @@ class App:
             if client_network == "ethereum":
                 self._init_ethereum_client_network()
                 self._logger.info("Ethereum client network initialized")
+            elif client_network == "web2_http":
+                self._init_web2_http_client_network()
+                self._logger.info("Web2 HTTP client network initialized")
             else:
                 raise ValueError(f"Unknown client network: {client_network}")
         if not self._client_networks:
@@ -169,6 +190,23 @@ class App:
                 owner_account_private_key=ethereum_config["owner_account_private_key"],
             ),
             self._logger
+        )
+
+    def _init_web2_http_client_network(self):
+        if "web2_http" not in self._config:
+            self._logger.error("Web2 HTTP client network is not configured")
+            raise ValueError("Web2 HTTP client network is not configured")
+
+        web2_http_config = self._config["web2_http"]
+        self._client_networks["web2_http"] = Web2HTTPClientNetwork(
+            Web2HTTPClientNetworkConfig(
+                host=web2_http_config["host"],
+                port=web2_http_config["port"],
+                ssl_key_path=web2_http_config.get("ssl_key_path",None),
+                ssl_cert_path=web2_http_config.get("ssl_cert_path",None),
+            ),
+            self._logger,
+            self._config["logger"]["config_path"],
         )
 
     def _register_signal_handlers(self):
@@ -219,7 +257,10 @@ class App:
                 )
                 correlated_id_used = True
             if client_network_id is None:
-                print(f"Unknown response id: {response.id}")
+                self._logger.error(
+                    f"Response with id {response.id} or correlation response id {response.correlation_response_id} "
+                    f"does not match any client network"
+                )
                 continue
 
             if response.status != ResponseStatus.ACCEPTED:
