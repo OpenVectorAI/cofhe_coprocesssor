@@ -145,7 +145,7 @@ contract COVToken is Ownable {
         );
         bytes[] memory empty_acl = new bytes[](0);
         bytes[] memory receiver_acl = new bytes[](2);
-        if (CRTT.isEUint32Initialized(balances[to])==false){
+        if (CRTT.isEUint32Initialized(balances[to]) == false) {
             console.log("Receiver %s is not registered", to);
             receiver_acl[0] = abi.encodePacked(address(this));
             receiver_acl[1] = abi.encodePacked(to);
@@ -718,8 +718,12 @@ contract COVToken is Ownable {
         totalSupply = total_supply;
     }
 
+    function setComputingValue(bool value) external onlyOwner {
+        computing = value;
+    }
+
     function reset_contract() external onlyOwner {
-        lockContract();
+        computing = true;
         console.log("Resetting the contract");
         for (uint256 i = 0; i < total_registered_users; i++) {
             registered_keys[registered_users[i]] = CRTT.getInvalidDataKey();

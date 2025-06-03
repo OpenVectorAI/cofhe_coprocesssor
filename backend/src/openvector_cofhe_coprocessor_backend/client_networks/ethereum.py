@@ -2366,6 +2366,12 @@ class EthereumClientNetwork(IClientNetwork):
                             "WebSocket connection lost. Waiting for reestablishment..."
                         )
                         return True
+
+                    if "filter not found" in str(e):
+                        self._logger.info("Filter not found. Reinitializing filter.")
+                        event_filter = await get_new_request_events_filter(contract)
+                        continous_error_count = 0
+                        continue
                     self._logger.error(
                         LogMessage(
                             message="Error while fetching requests, retrying in 5 seconds",
