@@ -708,6 +708,7 @@ SolidityRequest = Tuple[
     Any,
     Any,
     Any,
+    bool
 ]
 
 
@@ -724,6 +725,7 @@ class EthereumRequest:
     acceptance_callback: Any
     submission_callback: Any
     payment_callback: Any
+    use_tee: bool
 
 
 def encode_to_python_request(request: SolidityRequest) -> EthereumRequest:
@@ -738,6 +740,7 @@ def encode_to_python_request(request: SolidityRequest) -> EthereumRequest:
         acceptance_callback=request[7],
         submission_callback=request[8],
         payment_callback=request[9],
+        use_tee=request[10],
     )
 
 
@@ -754,6 +757,7 @@ def encode_to_solidity_request(request: EthereumRequest) -> SolidityRequest:
         request.acceptance_callback,
         request.submission_callback,
         request.payment_callback,
+        request.use_tee,
     )
 
 
@@ -766,6 +770,7 @@ def convert_to_native_request(
         op1=convert_to_native_operand(request.op1),
         op2=convert_to_native_operand(request.op2),
         verified_origin=verfied_origin,
+        use_tee=request.use_tee,
     )
 
 
@@ -785,6 +790,7 @@ def convert_from_native_request(request: Request) -> EthereumRequest:
         acceptance_callback=None,
         submission_callback=None,
         payment_callback=None,
+        use_tee=request.use_tee
     )
 
 
@@ -1366,6 +1372,7 @@ SolidityConfidentialCoinRequest = Tuple[
     int,
     Any,
     Any,
+    bool,
 ]
 
 
@@ -1384,6 +1391,7 @@ class EthereumConfidentialCoinRequest:
     # callback funcs acceptance callback and submission callback are not required here
     callback: Any
     payment_callback: Any
+    use_tee: bool
 
 
 def encode_to_python_confidential_coin_request(
@@ -1402,6 +1410,7 @@ def encode_to_python_confidential_coin_request(
         payment_callback_gas=Wei(confidential_coin_request[9]),
         callback=confidential_coin_request[10],
         payment_callback=confidential_coin_request[11],
+        use_tee=confidential_coin_request[12],
     )
 
 
@@ -1421,6 +1430,7 @@ def encode_to_solidity_confidential_coin_request(
         int(confidential_coin_request.payment_callback_gas),
         confidential_coin_request.callback,
         confidential_coin_request.payment_callback,
+        confidential_coin_request.use_tee,
     )
 
 
@@ -1444,6 +1454,7 @@ def convert_to_native_confidential_coin_request(
         consider_amount_negative=confidential_coin_request.consider_amount_negative,
         sender_balance_storage_key_acl=confidential_coin_request.sender_balance_storage_key_acl,
         receiver_balance_storage_key_acl=confidential_coin_request.receiver_balance_storage_key_acl,
+        use_tee= confidential_coin_request.use_tee,
     )
 
 
@@ -1469,6 +1480,7 @@ def convert_from_native_confidential_coin_request(
         # but currently we never abi encode this so it should be fine
         callback=None,
         payment_callback=None,
+        use_tee=request.use_tee,
     )
 
 
@@ -1987,6 +1999,7 @@ async def get_new_request_events(
     logger: Logger,
     callback: Callable[[List[EthereumNewRequestEvent]], Awaitable[None]],
     timeout: float = TIMEOUT,
+    poll_interval: float = 0.5,
 ) -> None:
     # save the events, if a the callback throws then those events are not considered used and are still new
     try:
@@ -2038,6 +2051,7 @@ async def get_new_request_events(
                 )
                 pass
         await callback(new_request_events)
+        await asyncio.sleep(poll_interval)
     except asyncio.TimeoutError as e:
         raise ValueError(f"Timeout while waiting for new request event: {e}")
     except Exception as e:
@@ -2495,8 +2509,8 @@ class EthereumClientNetwork(IClientNetwork):
 
         response_queue.put(None)  # type: ignore
         while not self._exit_signal.is_set():
-            try:
-                for response in iter(response_queue.get, None):  # type: ignore
+            for response in iter(response_queue.get, None):  # type: ignore
+                try:
                     if response.request_id not in fetched_requests:
                         self._logger.error(
                             f"Response for request {response.request_id} not found in fetched requests. Ignoring response."
@@ -2564,24 +2578,30 @@ class EthereumClientNetwork(IClientNetwork):
                     if response.status != ResponseStatus.ACCEPTED:
                         with fetched_request_lock:
                             fetched_requests.pop(response.request_id, None)
-                self._response_queue.put(None)  # type: ignore
-            except Exception as e:
-                if not (await self._sender_web3.is_connected()):
+                except Exception as e:
                     self._logger.error(
-                        "WebSocket connection lost. Waiting for reestablishment..."
+                        LogMessage(
+                            message="Error while sending response",
+                            structured_log_message_data={
+                                "error": e,
+                                "request_id": response.request_id,
+                            },
+                        )
                     )
-                    return True
-                self._logger.error(
-                    LogMessage(
-                        message="Error while sending response",
-                        structured_log_message_data={
-                            "error": e,
-                            "request_id": response.request_id,
-                        },
-                    )
-                )
-            finally:
-                await asyncio.sleep(0.1)
+                    if (not isinstance(response, ConfidentialCoinResponse)) and (
+                        not isinstance(response, Response)
+                    ): # for mypy
+                        continue
+                    response_queue.put(response)
+                    if not (await self._sender_web3.is_connected()):
+                        self._logger.error(
+                            "WebSocket connection lost. Waiting for reestablishment..."
+                        )
+                        return True
+
+            await asyncio.sleep(0.5)
+            response_queue.put(None)  # type: ignore
+
         return False
 
     def _wrap_async_function(self, func, *args):
