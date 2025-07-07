@@ -68,6 +68,7 @@ library CRTT {
         function(Response memory) external payable acceptance_callback;
         function(Response memory) external payable submission_callback;
         function(RequestID) external payable payment_callback;
+        bool use_tee;
     }
 
     enum ResponseStatus {
@@ -164,6 +165,7 @@ library CRTT {
         uint256 payment_callback_gas;
         function(ConfidentialCoinResponse memory) external payable callback;
         function(RequestID) external payable payment_callback;
+        bool use_tee;
     }
 
     struct ConfidentialCoinResponse {
@@ -329,8 +331,9 @@ interface COFHExecutor {
 // @notice This library is still under development and should not be used in production
 library COFHE {
     address constant COFHExecutorAddress =
-        0x2099B2BC946adF9203FCc9FF7Bd8306843783f6b;
-    // 0x5FbDB2315678afecb367f032d93F642f64180aa3;
+        // 0x2099B2BC946adF9203FCc9FF7Bd8306843783f6b;
+    0x5FbDB2315678afecb367f032d93F642f64180aa3;
+    bool constant USE_TEE = true;
 
     // @dev Add two numbers
     // @param a First number
@@ -781,7 +784,8 @@ library COFHE {
                 callback_gas: callback_gas,
                 payment_callback_gas: payment_callback_gas,
                 callback: callback,
-                payment_callback: payment_callback
+                payment_callback: payment_callback,
+                use_tee: USE_TEE
             });
         return
             COFHExecutor(COFHExecutorAddress).executeRequest{value: payment}(
@@ -823,7 +827,8 @@ library COFHE {
             payment_callback_gas: payment_callback_gas,
             acceptance_callback: acceptance_callback,
             submission_callback: completion_callback,
-            payment_callback: payment_callback
+            payment_callback: payment_callback,
+            use_tee: USE_TEE
         });
         return
             COFHExecutor(COFHExecutorAddress).executeRequest{value: payment}(
@@ -869,7 +874,8 @@ library COFHE {
             payment_callback_gas: payment_callback_gas,
             acceptance_callback: acceptance_callback,
             submission_callback: completion_callback,
-            payment_callback: payment_callback
+            payment_callback: payment_callback,
+            use_tee: USE_TEE
         });
 
         return

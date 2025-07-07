@@ -44,8 +44,8 @@ contract OVToken is ERC20 {
 
 contract COVToken is Ownable {
     address public constant TOKEN_CONTRACT =
-        0x3CEa0f53909E8Ef1Dbd86E59D50aDe14A6819107;
-    // 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512;
+        // 0x3CEa0f53909E8Ef1Dbd86E59D50aDe14A6819107;
+    0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512;
 
     uint256 constant N_BASE_PAYMENT = 163000 * 1000000000;
     uint256 constant O_BASE_PAYMENT = 1000;

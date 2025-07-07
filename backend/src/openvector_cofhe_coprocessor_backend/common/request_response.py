@@ -106,6 +106,7 @@ class Request(BaseModel):
     op1: Operand
     op2: Operand
     verified_origin: bytes
+    use_tee: bool = False
 
     @field_validator("verified_origin", mode="before")
     @classmethod
@@ -157,6 +158,7 @@ class ConfidentialCoinRequest(BaseModel):
     consider_amount_negative: bool
     sender_balance_storage_key_acl: List[bytes] = Field(default_factory=list)
     receiver_balance_storage_key_acl: List[bytes] = Field(default_factory=list)
+    use_tee: bool = False
 
     @field_validator("sender_balance_storage_key", mode="before")
     @classmethod

@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  cofhe_final_0:
+    build:
+      context: .
+    container_name: cofhe_final_0_node
+    restart: unless-stopped
+    ports:
+      - "8001:8001" # HTTP Relayer
+      - "8002:8002" # Coprocessor Backend
+      - "8545:8545" # Hardhat Node
+      # CoFHE network ports
+      - "4455:4455"
+      - "4457:4457"
+      - "4458:4458"
+    networks:
+      - cofhe_net
+
+networks:
+  cofhe_net:
+    driver: bridge
